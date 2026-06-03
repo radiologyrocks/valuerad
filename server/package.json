@@ -1,0 +1,15 @@
+{
+  "name": "valuerad-server",
+  "version": "1.0.0",
+  "description": "ValueRad FHIR SMART App Launch backend",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2"
+  }
+}
