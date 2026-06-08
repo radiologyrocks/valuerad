@@ -40,4 +40,31 @@ export class FhirClient {
   appointments(patientId) {
     return this._get('Appointment', { patient: patientId, _sort: 'date' });
   }
+
+  // ---------------------------------------------------------------------------
+  // Accession-based lookups — the bridge between a billing exception (which
+  // carries the radiology accession number) and the Epic study/report it refers
+  // to. `accessionSystem` is the identifier system Epic assigns to accessions;
+  // it varies by site, so it's configurable via ACCESSION_IDENTIFIER_SYSTEM.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Find the DiagnosticReport for a radiology accession number.
+   * Returns the first matching report, or null if none is found.
+   */
+  async diagnosticReportByAccession(accession, accessionSystem) {
+    const identifier = accessionSystem ? `${accessionSystem}|${accession}` : accession;
+    const bundle = await this._get('DiagnosticReport', { identifier });
+    return bundle?.entry?.[0]?.resource ?? null;
+  }
+
+  /**
+   * Find the ImagingStudy for a radiology accession number. Useful for
+   * launching the images (the study carries the PACS/viewer endpoints).
+   */
+  async imagingStudyByAccession(accession, accessionSystem) {
+    const identifier = accessionSystem ? `${accessionSystem}|${accession}` : accession;
+    const bundle = await this._get('ImagingStudy', { identifier });
+    return bundle?.entry?.[0]?.resource ?? null;
+  }
 }

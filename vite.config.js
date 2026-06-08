@@ -10,4 +10,13 @@ export default defineConfig({
     },
   },
   base: '/',
+  server: {
+    // Proxy API calls to the backend during local dev so the embedded app
+    // (served by Vite) can reach the billing/SMART routes on port 3001.
+    proxy: {
+      '/billing': 'http://localhost:3001',
+      '/epic': 'http://localhost:3001',
+      '/health': 'http://localhost:3001',
+    },
+  },
 })

@@ -17,11 +17,9 @@ import {
 } from '../lib/smart.js';
 
 import { FhirClient } from '../lib/fhir.js';
+import { sessions } from '../lib/sessions.js';
 
 const router = Router();
-
-// In-process session store (replace with Redis/DB in production)
-const sessions = new Map();
 
 const CLIENT_ID     = process.env.EPIC_CLIENT_ID     ?? 'YOUR_EPIC_CLIENT_ID';
 const CLIENT_SECRET = process.env.EPIC_CLIENT_SECRET ?? null; // public app = no secret
@@ -138,8 +136,9 @@ router.get('/callback', async (req, res) => {
       createdAt: Date.now(),
     });
 
-    // Redirect to SPA with session handle; SPA then calls /epic/context
-    return res.redirect(`/?session=${sessionId}`);
+    // Redirect to the embedded app with the session handle; the SPA then calls
+    // /epic/context and loads the billing worklist.
+    return res.redirect(`/app?session=${sessionId}`);
   } catch (err) {
     console.error('[callback] token exchange error:', err.message);
     return res.status(502).json({ error: 'token_exchange_failed', detail: err.message });
