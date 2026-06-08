@@ -41,7 +41,10 @@
  *   }
  */
 
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import fetch from 'node-fetch';
+import { parseExceptionFile } from './mbms-parsers.js';
 
 // ---------------------------------------------------------------------------
 // Categories — coarse buckets we map MBMS reasons into. These steer the
@@ -298,6 +301,177 @@ class MbmsMockSource {
   }
 }
 
+// ===========================================================================
+// File source — reads CSV exports and/or X12 835 ERA files from a directory
+// (an SFTP drop or a portal export folder). This is the most likely real-world
+// MBMS channel, since their Resolve platform has no public API.
+// ===========================================================================
+class MbmsFileSource {
+  constructor({ dir } = {}) {
+    this.dir = dir ?? process.env.MBMS_FILE_DIR ?? '';
+    if (!this.dir) {
+      throw new Error('MBMS_FILE_DIR is required when MBMS_SOURCE=file');
+    }
+    this.columnMap = parseJsonEnv('MBMS_CSV_COLUMNS');
+    // Resolutions are tracked locally — inbound files are read-only.
+    this._resolved = new Map();
+  }
+
+  async _readAll() {
+    let names;
+    try {
+      names = await fs.readdir(this.dir);
+    } catch (err) {
+      throw new Error(`Cannot read MBMS_FILE_DIR (${this.dir}): ${err.message}`);
+    }
+    const files = names.filter((n) => /\.(csv|txt|835|era|edi)$/i.test(n));
+    const all = [];
+    for (const name of files) {
+      const text = await fs.readFile(path.join(this.dir, name), 'utf8');
+      try {
+        for (const rec of parseExceptionFile(text, { columnMap: this.columnMap })) {
+          all.push({ ...rec, _sourceFile: name });
+        }
+      } catch (err) {
+        console.error(`[mbms-file] failed to parse ${name}: ${err.message}`);
+      }
+    }
+    return all;
+  }
+
+  async listExceptions({ status } = {}) {
+    const raw = await this._readAll();
+    const exceptions = raw.map((rec) => {
+      const norm = normalizeMbmsRecord(rec);
+      if (this._resolved.has(norm.id)) norm.status = 'resolved';
+      return norm;
+    });
+    return status ? exceptions.filter((e) => e.status === status) : exceptions;
+  }
+
+  async getException(id) {
+    const all = await this.listExceptions();
+    return all.find((e) => e.id === String(id) || e.exceptionNumber === String(id)) ?? null;
+  }
+
+  async markResolved(id, { addendumText, resolvedBy } = {}) {
+    this._resolved.set(String(id), { addendumText, resolvedBy, at: new Date().toISOString() });
+    const ex = await this.getException(id);
+    return ex ?? { id, status: 'resolved' };
+  }
+}
+
+// ===========================================================================
+// Waystar source — Waystar is the clearinghouse/denial-management platform MBMS
+// is known to use (waystar.com/insights-resources MBMS case study). Unlike
+// MBMS's own Resolve, Waystar publishes a REST API (eligibility, claim status
+// 276/277, remittance 835, denial + appeal management). Access requires
+// Waystar API credentials scoped to the account — typically OAuth2 client
+// credentials. Endpoint paths below must be confirmed against Waystar's API
+// docs / your account's API enablement.
+// ===========================================================================
+class WaystarSource {
+  constructor({ baseUrl, clientId, clientSecret } = {}) {
+    this.baseUrl = (baseUrl ?? process.env.WAYSTAR_API_BASE_URL ?? '').replace(/\/$/, '');
+    this.clientId = clientId ?? process.env.WAYSTAR_CLIENT_ID ?? '';
+    this.clientSecret = clientSecret ?? process.env.WAYSTAR_CLIENT_SECRET ?? '';
+    this.tokenUrl = process.env.WAYSTAR_TOKEN_URL ?? `${this.baseUrl}/oauth/token`;
+    if (!this.baseUrl) {
+      throw new Error('WAYSTAR_API_BASE_URL is required when MBMS_SOURCE=waystar');
+    }
+    this._token = null;
+    this._tokenExp = 0;
+  }
+
+  async _accessToken() {
+    if (this._token && Date.now() < this._tokenExp - 30_000) return this._token;
+    // OAuth2 client-credentials grant (confirm with Waystar's API docs).
+    const res = await fetch(this.tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: this.clientId,
+        client_secret: this.clientSecret,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(`Waystar token failed (${res.status}): ${JSON.stringify(data)}`);
+    this._token = data.access_token;
+    this._tokenExp = Date.now() + (data.expires_in ?? 3600) * 1000;
+    return this._token;
+  }
+
+  async _get(path, params = {}) {
+    const token = await this._accessToken();
+    const url = new URL(`${this.baseUrl}/${path.replace(/^\//, '')}`);
+    Object.entries(params).forEach(([k, v]) => v != null && url.searchParams.set(k, v));
+    const res = await fetch(url.toString(), {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(`Waystar ${path} failed (${res.status}): ${JSON.stringify(data)}`);
+    return data;
+  }
+
+  // TODO: confirm the denial endpoint + response envelope with Waystar.
+  async listExceptions({ status } = {}) {
+    const data = await this._get('denials', { status });
+    const records = data?.data ?? data?.denials ?? (Array.isArray(data) ? data : []);
+    return records.map(normalizeWaystarDenial);
+  }
+
+  async getException(id) {
+    const data = await this._get(`denials/${encodeURIComponent(id)}`);
+    return normalizeWaystarDenial(data?.data ?? data);
+  }
+
+  // Waystar exposes appeal-management endpoints; resolving here could file/track
+  // an appeal note. Confirm the contract before enabling write-back.
+  async markResolved(id, { addendumText, resolvedBy } = {}) {
+    const token = await this._accessToken();
+    const res = await fetch(`${this.baseUrl}/denials/${encodeURIComponent(id)}/resolve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ note: addendumText, resolvedBy, resolvedAt: new Date().toISOString() }),
+    });
+    if (!res.ok) throw new Error(`Waystar markResolved failed (${res.status})`);
+    return { id, status: 'resolved' };
+  }
+}
+
+/** Map a Waystar denial record into our normalized shape. */
+function normalizeWaystarDenial(rec = {}) {
+  return normalizeMbmsRecord({
+    id: rec.denialId ?? rec.id,
+    exceptionNumber: rec.claimNumber ?? rec.claimId ?? rec.id,
+    status: rec.status,
+    accessionNumber: rec.accessionNumber ?? rec.accession ?? '',
+    studyDescription: rec.procedureDescription ?? rec.serviceDescription ?? '',
+    modality: rec.modality ?? '',
+    mrn: rec.patientMrn ?? rec.mrn ?? '',
+    patientName: rec.patientName ?? '',
+    cptCode: rec.procedureCode ?? rec.cpt ?? '',
+    icd10Codes: rec.diagnosisCodes ?? [],
+    // Waystar denials carry CARC/RARC codes — surface them as the reason.
+    reason: rec.denialReason
+      ?? [rec.carcCode && `[${rec.carcCode}]`, rec.carcDescription].filter(Boolean).join(' ')
+      ?? '',
+    payer: rec.payerName ?? rec.payer ?? '',
+    dateOfService: rec.dateOfService ?? rec.dos ?? '',
+    raw: rec,
+  });
+}
+
+function parseJsonEnv(name) {
+  const v = process.env[name];
+  if (!v) return undefined;
+  try { return JSON.parse(v); } catch { return undefined; }
+}
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -305,8 +479,12 @@ let _singleton = null;
 
 export function createMbmsClient() {
   const source = (process.env.MBMS_SOURCE ?? 'mock').toLowerCase();
-  if (source === 'api') return new MbmsApiSource();
-  return new MbmsMockSource();
+  switch (source) {
+    case 'api': return new MbmsApiSource();
+    case 'file': return new MbmsFileSource();
+    case 'waystar': return new WaystarSource();
+    default: return new MbmsMockSource();
+  }
 }
 
 /** Process-wide MBMS client (mock state persists across requests in dev). */

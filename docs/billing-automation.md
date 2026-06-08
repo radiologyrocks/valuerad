@@ -42,7 +42,8 @@ PowerScribe report ↔ Epic study).
 
 | Piece | File | Notes |
 |---|---|---|
-| MBMS adapter | `server/lib/mbms.js` | Normalizes exceptions to one shape. `api` or `mock` source. |
+| MBMS adapter | `server/lib/mbms.js` | Normalizes exceptions to one shape. `mock` / `file` / `waystar` / `api` sources. |
+| File/835 parsers | `server/lib/mbms-parsers.js` | Parse CSV exports and X12 835 ERA denial files into the same shape. |
 | PowerScribe adapter | `server/lib/powerscribe.js` | Read report text; create **draft** addendum; build study launch URL. `api` or `mock`. |
 | Addendum drafting | `server/lib/addendum.js` | Claude (`@anthropic-ai/sdk`, Opus 4.8, adaptive thinking, structured output). Draft only — a human always signs. |
 | FHIR/Epic resolution | `server/lib/fhir.js` | `diagnosticReportByAccession` / `imagingStudyByAccession` for in-Epic context. |
@@ -85,13 +86,24 @@ still runs on mock data.
 Everything ships behind adapters with `mock` defaults so the workflow is
 demonstrable now. To connect the real systems:
 
-1. **MBMS API** (`MBMS_SOURCE=api`). Confirm with MBMS whether they expose a
-   REST API (or only a portal / SFTP file drop). Set `MBMS_API_BASE_URL`,
-   `MBMS_API_KEY`, `MBMS_AUTH_HEADER`. Adjust the endpoint paths and
-   response-envelope field names in `MbmsApiSource` and `normalizeMbmsRecord`
-   to match their contract. If they only do file exchange (CSV/X12 835), add a
-   file-import source implementing the same `listExceptions` / `getException` /
-   `markResolved` interface.
+1. **MBMS feed** — MBMS (mbms.net) has **no public API**; their platform
+   (Resolve) exposes a portal, so the realistic channels are, in order of
+   likelihood:
+   - **`MBMS_SOURCE=file`** — drop CSV exports and/or X12 835 ERA files into
+     `MBMS_FILE_DIR` (an SFTP landing folder or portal-export dir). Parsers live
+     in `mbms-parsers.js`; override CSV headers with `MBMS_CSV_COLUMNS` and
+     extend `CARC_TEXT` / REF handling against real files.
+   - **`MBMS_SOURCE=waystar`** — MBMS uses the Waystar clearinghouse, which
+     *does* publish a denial/claim-status REST API. Set `WAYSTAR_API_BASE_URL`,
+     `WAYSTAR_CLIENT_ID`, `WAYSTAR_CLIENT_SECRET`; confirm endpoint paths against
+     Waystar's API docs and your account's enablement.
+   - **`MBMS_SOURCE=api`** — only if MBMS ever provisions a direct REST API for
+     your account; set `MBMS_API_BASE_URL` / `MBMS_API_KEY` / `MBMS_AUTH_HEADER`
+     and adjust `MbmsApiSource`.
+
+   Ask your MBMS rep: (a) API access or portal/SFTP only? (b) can we get a
+   scheduled CSV/835 export to an SFTP endpoint? (c) do you run denials through
+   Waystar, and can we get account-scoped Waystar API credentials?
 2. **PowerScribe** (`POWERSCRIBE_SOURCE=api`). Work with the Nuance/site
    integration team to get the Reporting web-services endpoint + credentials.
    Fill in the report-lookup and addendum-create calls in
