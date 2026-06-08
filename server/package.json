@@ -9,6 +9,7 @@
     "dev": "node --watch index.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
     "express": "^4.19.2",
     "node-fetch": "^3.3.2"
   }

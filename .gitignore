@@ -4,3 +4,6 @@ dist
 *.local
 valuerad-frontend/node_modules
 valuerad-frontend/dist
+
+.env
+server/.env
