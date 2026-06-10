@@ -253,3 +253,17 @@ warehouse, and metric library already exist and are tested, the living-software
 layer is mostly *composition* — one new table, one interpreter, one more
 runner, one policy extension, three UI panels. The governance harness that
 everyone else would have to build first is the part that's already done.
+
+---
+
+## 8. Implementation note
+
+All three phases are now in code; see `IMPLEMENTATION_STATUS.md` for the
+component→module map. The §4 gap list landed as: registry (`lib/features.js`
++ `living_features` in `db/schema.sql`), DSL + interpreter (`domain/dsl.js`),
+builder agent (`agent/builder.js`), feature policy + lifecycle + harness
+(`domain/feature.js`), golden fixtures (`domain/fixtures.js`), certified
+catalog (`domain/catalog.js`), lifecycle/run/canary/rollback/revalidate API
+(`routes/features.js`), rule-pack and mapper seams (`domain/priorauth.js`,
+`routes/agent.js`, `routes/bi.js`), and the Command Center panel
+(`src/pages/CommandCenter.jsx`).

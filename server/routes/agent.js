@@ -14,6 +14,7 @@ import { store } from '../lib/store.js';
 import { queue } from '../lib/jobs.js';
 import { FhirClient, SchedulingClient } from '../lib/fhir.js';
 import { requireRole, ROLES } from '../lib/rbac.js';
+import { loadActiveRulePack } from '../lib/features.js';
 
 const router = Router();
 
@@ -45,6 +46,9 @@ router.post('/agent/run', requireRole(ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.SCHEDU
     }
   }
 
+  // Active payer rule packs (Tier-2 living features) feed the auth guardrail.
+  const rulePack = await loadActiveRulePack();
+
   // `data` carries any extra domain context the agent's tools read (waitlist,
   // radiologists, coverage, etc.) until every provider is EHR-backed per tenant.
   const services = {
@@ -53,11 +57,12 @@ router.post('/agent/run', requireRole(ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.SCHEDU
     sessionId,
     scheduling,
     fhir,
+    rulePack,
     ...data,
   };
 
   try {
-    const result = await runAgent({ task, client, services, mode, ctx: context });
+    const result = await runAgent({ task, client, services, mode, ctx: { rulePack, ...context } });
     return res.json(result);
   } catch (err) {
     console.error('[agent] run error:', err.message);

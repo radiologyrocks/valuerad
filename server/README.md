@@ -49,6 +49,17 @@ encrypted store.
 | POST | `/api/bi/snapshot` | executive BI snapshot (inline body or `{source:"warehouse"}`) |
 | POST | `/api/bi/scorecard` | CEO KPI scorecard with targets, variance, and exception alerts |
 | POST | `/api/bi/report` | full CEO report (snapshot + denials, A/R, referrals, turnaround, productivity, funnel) |
+| GET  | `/api/features` | living-feature registry (any staff role) |
+| GET  | `/api/features/catalog` | certified feature catalog |
+| POST | `/api/features` | propose a hand-written definition (validated + golden-tested) |
+| POST | `/api/features/catalog/:key/install` | install a certified definition as proposed |
+| POST | `/api/features/request` | natural-language request → builder agent (503 without `ANTHROPIC_API_KEY`) |
+| POST | `/api/features/:id/approve` | tier 1 → active; tier 2 → canary, then → active |
+| POST | `/api/features/:id/canary` | shadow-evaluate a tier-2 feature; stores the divergence/preview report |
+| POST | `/api/features/:id/run` | execute a report/export (or dry-run a mapper), RBAC per definition |
+| POST | `/api/features/:id/rollback` | re-activate the prior version |
+| POST | `/api/features/:id/reject` · `/retire` | lifecycle |
+| POST | `/api/features/revalidate` | re-run golden tests on all active features (upgrade gate) |
 
 BI works two ways from the same metric engine (`domain/bi.js`): **CSV/JSON
 extracts** (no integrations needed — upload RCM/RIS/payer-remit exports) and a
@@ -65,6 +76,20 @@ channels, a data warehouse, an Anthropic key + BAA).
 The agent uses `claude-opus-4-8` with adaptive thinking and a manual,
 guardrail-gated tool loop. It defaults to **recommend mode** (proposes, never
 mutates) and graduates to **autonomous** per capability once trusted.
+
+## Living software
+
+Users request features in natural language; the **builder agent**
+(`agent/builder.js`) composes a declarative definition (`domain/dsl.js` —
+configuration for a trusted engine, never code), tests it against synthetic
+golden fixtures (`domain/fixtures.js`), and registers it as **proposed**.
+Activation is always a human decision; every lifecycle step is an audit row.
+Tier 1 (reports/exports) is read-only over the warehouse; Tier 2 (payer
+rule packs, ingest mappers) configures platform seams and must pass a
+**canary** shadow-evaluation before promotion; Tier 3 (guardrails, FHIR
+writes, crypto, RBAC, audit) is never generated. The builder's tools have no
+code path to real data — generation runs outside the BAA boundary. See
+`../docs/LIVING_SOFTWARE.md`.
 
 ## Production checklist (not in code)
 

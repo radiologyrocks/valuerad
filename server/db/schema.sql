@@ -100,3 +100,30 @@ CREATE TABLE IF NOT EXISTS wh_facts (
 );
 CREATE INDEX IF NOT EXISTS wh_facts_dataset_idx ON wh_facts (dataset);
 
+-- Living-feature registry — the system of record for user-requested,
+-- system-built features (docs/LIVING_SOFTWARE.md). Rows are versioned and
+-- never overwritten: a new version is a new row; rollback re-points the
+-- active version. `definition` is declarative DSL data (domain/dsl.js),
+-- never code. `test_evidence` is the golden-test attestation bundle.
+CREATE TABLE IF NOT EXISTS living_features (
+  id             BIGSERIAL PRIMARY KEY,
+  feature_key    TEXT NOT NULL,
+  version        INT NOT NULL DEFAULT 1,
+  name           TEXT NOT NULL,
+  kind           TEXT NOT NULL,   -- report | export | rule_pack | ingest_mapper
+  tier           INT NOT NULL,    -- 1 declarative read-only | 2 constrained config
+  spec           TEXT,            -- the natural-language request it was built from
+  definition     JSONB NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'proposed', -- proposed|canary|active|retired|rejected
+  content_hash   TEXT NOT NULL,
+  engine_version TEXT NOT NULL,
+  created_by     TEXT,
+  approved_by    TEXT,
+  test_evidence  JSONB,
+  history        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (feature_key, version)
+);
+CREATE INDEX IF NOT EXISTS living_features_status_idx ON living_features (status, kind);
+

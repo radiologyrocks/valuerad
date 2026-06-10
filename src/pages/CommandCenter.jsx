@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
-import { Activity, Bot, BarChart3, AlertTriangle, CheckCircle2, Clock, ShieldAlert, Hospital, Gauge, Upload, Database } from 'lucide-react';
+import { Activity, Bot, BarChart3, AlertTriangle, CheckCircle2, Clock, ShieldAlert, Hospital, Gauge, Upload, Database, Sparkles, Play, RotateCcw, PackagePlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -354,10 +354,199 @@ const CommandCenter = () => {
             </div>
           </CardContent>
         </Card>
+
+        <LivingFeatures />
       </div>
     </>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Living features — request, approve, run, roll back (docs/LIVING_SOFTWARE.md)
+// ---------------------------------------------------------------------------
+
+const FEATURE_STATUS_VARIANT = {
+  proposed: 'bg-amber-500/15 text-amber-700',
+  canary: 'bg-blue-500/15 text-blue-700',
+  active: 'bg-green-500/15 text-green-700',
+  retired: 'bg-muted text-muted-foreground',
+  rejected: 'bg-destructive/15 text-destructive',
+};
+
+function LivingFeatures() {
+  const [spec, setSpec] = useState('A monthly denials-by-payer CSV I can upload to my billing portal.');
+  const [features, setFeatures] = useState([]);
+  const [catalog, setCatalog] = useState([]);
+  const [busy, setBusy] = useState(null); // id of feature being acted on, or 'request'
+  const [message, setMessage] = useState(null);
+  const [runResult, setRunResult] = useState(null);
+
+  const refresh = async () => {
+    try { setFeatures((await apiGet('/api/features')).features); } catch { /* backend offline */ }
+    try { setCatalog((await apiGet('/api/features/catalog')).catalog); } catch { /* backend offline */ }
+  };
+  useEffect(() => { refresh(); }, []);
+
+  const act = async (label, fn) => {
+    setMessage(null);
+    setRunResult(null);
+    try {
+      const out = await fn();
+      setMessage({ ok: true, text: label });
+      await refresh();
+      return out;
+    } catch (err) {
+      setMessage({
+        ok: false,
+        text: err.status === 503
+          ? 'The builder needs an ANTHROPIC_API_KEY on the backend. (It never sees PHI — generation runs on schema + synthetic fixtures only.)'
+          : err.message,
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const requestFeature = () => {
+    setBusy('request');
+    act('Request sent to the builder.', async () => {
+      const r = await apiPost('/api/features/request', { spec });
+      setMessage({
+        ok: true,
+        text: r.proposed?.length
+          ? `Builder proposed: ${r.proposed.map((f) => `${f.name} v${f.version}`).join(', ')} — awaiting your approval.`
+          : (r.summary || 'The builder finished without a proposal.'),
+      });
+    });
+  };
+
+  const install = (key) => {
+    setBusy(`install-${key}`);
+    act(`Installed "${key}" as proposed — approve it to activate.`, () => apiPost(`/api/features/catalog/${key}/install`, {}));
+  };
+
+  const lifecycle = (f, action, label) => {
+    setBusy(f.id);
+    act(label, () => apiPost(`/api/features/${f.id}/${action}`, {}));
+  };
+
+  const run = (f) => {
+    setBusy(f.id);
+    act(`Ran ${f.name}.`, async () => {
+      const r = await apiPost(`/api/features/${f.id}/run`, {});
+      setRunResult({ feature: f, result: r.result ?? r });
+    });
+  };
+
+  return (
+    <Card className="mt-6">
+      <CardHeader>
+        <div className="flex items-center gap-2"><Sparkles className="w-5 h-5 text-primary" /><CardTitle className="text-xl">Living features</CardTitle></div>
+        <CardDescription>
+          Describe a report, export, payer rule pack, or ingest mapping — the builder composes it as declarative
+          configuration (never code), tests it on synthetic fixtures, and queues it for your approval. Every step
+          is an audit record; the builder never sees real data.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Request box */}
+        <div className="space-y-2">
+          <Textarea value={spec} onChange={(e) => setSpec(e.target.value)} rows={2} className="text-foreground" />
+          <Button onClick={requestFeature} disabled={busy === 'request'}>
+            {busy === 'request' ? 'Building…' : 'Request feature'}
+          </Button>
+        </div>
+
+        {message && (
+          <div className={`text-sm rounded-md p-3 ${message.ok ? 'bg-muted/50' : 'text-destructive bg-destructive/10'}`}>{message.text}</div>
+        )}
+
+        {/* Certified catalog */}
+        {catalog.length > 0 && (
+          <div>
+            <div className="text-sm font-medium mb-2 flex items-center gap-1.5"><PackagePlus className="w-4 h-4" /> Certified catalog</div>
+            <div className="flex flex-wrap gap-2">
+              {catalog.map((c) => (
+                <button
+                  key={c.featureKey}
+                  onClick={() => install(c.featureKey)}
+                  disabled={busy === `install-${c.featureKey}`}
+                  title={c.spec}
+                  className="text-xs px-2 py-1 rounded-full border hover:bg-muted transition-colors"
+                >
+                  + {c.definition.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Gallery / approval queue */}
+        {features.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Features ({features.length})</div>
+            {features.map((f) => (
+              <div key={f.id} className="flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm">
+                <span className="font-medium">{f.name}</span>
+                <span className="text-xs text-muted-foreground">v{f.version} · {f.kind} · tier {f.tier}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${FEATURE_STATUS_VARIANT[f.status] || ''}`}>{f.status}</span>
+                {f.testEvidence && (
+                  <span className={`text-xs ${f.testEvidence.ok ? 'text-green-600' : 'text-destructive'}`}>
+                    golden {f.testEvidence.ok ? '✓' : '✗'}
+                  </span>
+                )}
+                <span className="flex-1" />
+                {f.status === 'proposed' && (
+                  <>
+                    <Button size="sm" variant="secondary" disabled={busy === f.id} onClick={() => lifecycle(f, 'approve', f.tier === 2 ? `${f.name} approved into canary.` : `${f.name} is now active.`)}>
+                      <CheckCircle2 className="w-3.5 h-3.5 mr-1" />{f.tier === 2 ? 'Approve → canary' : 'Approve'}
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={busy === f.id} onClick={() => lifecycle(f, 'reject', `${f.name} rejected.`)}>Reject</Button>
+                  </>
+                )}
+                {f.status === 'canary' && (
+                  <>
+                    <Button size="sm" variant="secondary" disabled={busy === f.id} onClick={() => lifecycle(f, 'canary', `Canary report stored for ${f.name} — review it, then promote.`)}>
+                      Shadow-evaluate
+                    </Button>
+                    <Button size="sm" variant="secondary" disabled={busy === f.id} onClick={() => lifecycle(f, 'approve', `${f.name} promoted to active.`)}>
+                      <CheckCircle2 className="w-3.5 h-3.5 mr-1" />Promote
+                    </Button>
+                  </>
+                )}
+                {f.status === 'active' && (
+                  <>
+                    {(f.kind === 'report' || f.kind === 'export' || f.kind === 'ingest_mapper') && (
+                      <Button size="sm" disabled={busy === f.id} onClick={() => run(f)}>
+                        <Play className="w-3.5 h-3.5 mr-1" />Run
+                      </Button>
+                    )}
+                    <Button size="sm" variant="ghost" disabled={busy === f.id} onClick={() => lifecycle(f, 'rollback', `${f.name} rolled back to the prior version.`)}>
+                      <RotateCcw className="w-3.5 h-3.5 mr-1" />Roll back
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={busy === f.id} onClick={() => lifecycle(f, 'retire', `${f.name} retired.`)}>Retire</Button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Run output */}
+        {runResult && (
+          <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+            <div className="text-sm font-medium">{runResult.feature.name} — output</div>
+            {runResult.result.format === 'csv' ? (
+              <pre className="text-xs font-mono whitespace-pre-wrap overflow-x-auto">{runResult.result.csv}</pre>
+            ) : (
+              <pre className="text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-80 overflow-y-auto">{JSON.stringify(runResult.result, null, 2)}</pre>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 const STATUS_STYLES = {
   ok: 'border-green-500/40 bg-green-500/5',

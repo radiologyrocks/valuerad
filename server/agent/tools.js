@@ -172,7 +172,7 @@ export const TOOLS = {
       required: ['orderId', 'modality', 'payer'],
     },
     async handler({ input, services }) {
-      const required = authRequired({ modality: input.modality }, { name: input.payer });
+      const required = authRequired({ modality: input.modality }, { name: input.payer }, services.rulePack ?? null);
       if (!required.required) return { submitted: false, reason: required.reason };
       const jobId = services.queue ? await services.queue.enqueue('submit_prior_auth', input) : null;
       return { submitted: true, status: AUTH_STATES.SUBMITTED, jobId };

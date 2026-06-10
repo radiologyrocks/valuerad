@@ -19,12 +19,14 @@ import { executiveSnapshot, scorecard, ceoReport, DEFAULT_TARGETS } from '../dom
 import { parseCsv } from '../lib/csv.js';
 import { warehouse, warehouseBackend, loadDatasets, DATASETS } from '../lib/warehouse.js';
 import { requireRole, ROLES } from '../lib/rbac.js';
+import { activeByKey } from '../lib/features.js';
+import { applyMapper } from '../domain/dsl.js';
 
 const router = Router();
 const exec = requireRole(ROLES.EXECUTIVE, ROLES.ADMIN);
 
 router.post('/bi/ingest', exec, async (req, res) => {
-  const { dataset, format = 'json', csv, rows, source, replace = false } = req.body ?? {};
+  const { dataset, format = 'json', csv, rows, source, replace = false, mapper } = req.body ?? {};
   if (!DATASETS.includes(dataset)) {
     return res.status(400).json({ error: `dataset must be one of: ${DATASETS.join(', ')}` });
   }
@@ -33,6 +35,19 @@ router.post('/bi/ingest', exec, async (req, res) => {
     records = format === 'csv' ? parseCsv(csv ?? '') : (Array.isArray(rows) ? rows : []);
   } catch (err) {
     return res.status(400).json({ error: `parse failed: ${err.message}` });
+  }
+
+  // An ACTIVE ingest_mapper living feature can translate the source's column
+  // names/types into the dataset's fields before storage.
+  if (mapper) {
+    const feature = await activeByKey(mapper);
+    if (!feature || feature.kind !== 'ingest_mapper') {
+      return res.status(422).json({ error: 'mapper must name an active ingest_mapper feature' });
+    }
+    if (feature.definition.dataset !== dataset) {
+      return res.status(422).json({ error: `mapper "${mapper}" targets dataset "${feature.definition.dataset}", not "${dataset}"` });
+    }
+    records = applyMapper(feature.definition, records);
   }
   if (records.length === 0) return res.status(400).json({ error: 'no rows to ingest' });
 

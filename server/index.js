@@ -3,6 +3,7 @@ import { smartRouter } from './routes/smart.js';
 import { leadsRouter } from './routes/leads.js';
 import { agentRouter } from './routes/agent.js';
 import { biRouter } from './routes/bi.js';
+import { featuresRouter } from './routes/features.js';
 import { migrate, databaseEnabled, closeDb } from './lib/db.js';
 import { storeBackend } from './lib/store.js';
 import { encryptionEnabled } from './lib/crypto.js';
@@ -33,6 +34,7 @@ app.use('/epic', smartRouter);
 app.use('/api', leadsRouter);
 app.use('/api', agentRouter);
 app.use('/api', biRouter);
+app.use('/api', featuresRouter);
 
 async function start() {
   try {
