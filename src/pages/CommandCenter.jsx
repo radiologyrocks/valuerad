@@ -1,11 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
-import { Activity, Bot, BarChart3, AlertTriangle, CheckCircle2, Clock, ShieldAlert } from 'lucide-react';
+import { Activity, Bot, BarChart3, AlertTriangle, CheckCircle2, Clock, ShieldAlert, Hospital } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { apiPost, API_BASE } from '@/lib/api.js';
+import { apiPost, apiGet, API_BASE } from '@/lib/api.js';
+
+function patientName(patient) {
+  const n = patient?.name?.[0];
+  if (!n) return null;
+  return [n.given?.join(' '), n.family].filter(Boolean).join(' ') || n.text || null;
+}
 
 // Demo domain context the agent's read tools operate on when no live EHR
 // session is attached. With a SMART session, the backend swaps these for real
@@ -71,12 +77,28 @@ const CommandCenter = () => {
   const [biError, setBiError] = useState(null);
   const [biLoading, setBiLoading] = useState(false);
 
+  // EHR launch context — present when Epic launched us into this view.
+  const [session, setSession] = useState(null);
+  const [ehr, setEhr] = useState(null);
+
+  useEffect(() => {
+    const sid = new URLSearchParams(window.location.search).get('session');
+    if (!sid) return;
+    setSession(sid);
+    apiGet(`/epic/context?session=${encodeURIComponent(sid)}`)
+      .then(setEhr)
+      .catch(() => setEhr(null));
+  }, []);
+
   const runAgent = async () => {
     setAgentLoading(true);
     setAgentError(null);
     setAgentResult(null);
     try {
-      const result = await apiPost('/api/agent/run', { task, mode, data: DEMO_DATA });
+      // When launched from Epic, send the live data (no demo fallback) and the
+      // session so the agent's tools read the real chart.
+      const body = session ? { task, mode } : { task, mode, data: DEMO_DATA };
+      const result = await apiPost('/api/agent/run', body, { session });
       setAgentResult(result);
     } catch (err) {
       setAgentError(err.status === 503
@@ -108,11 +130,23 @@ const CommandCenter = () => {
           <Activity className="w-7 h-7 text-primary" />
           <h1 className="text-3xl md:text-4xl font-bold" style={{ letterSpacing: '-0.02em' }}>Command Center</h1>
         </div>
-        <p className="text-muted-foreground mb-8 max-w-3xl">
+        <p className="text-muted-foreground mb-6 max-w-3xl">
           Drives the live backend ({API_BASE || 'same origin'}). The agent runs in{' '}
           <span className="font-medium">recommend mode</span> by default — it proposes actions, never mutates,
           until a capability earns autonomy. With a SMART session attached, its read tools hit the real EHR.
         </p>
+
+        {session && (
+          <div className="mb-8 flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+            <Hospital className="w-5 h-5 text-primary shrink-0" />
+            <div className="text-sm">
+              <span className="font-medium">Launched from Epic.</span>{' '}
+              {ehr?.patient
+                ? <>Patient context: <span className="font-medium">{patientName(ehr.patient) || ehr.patientId}</span>{ehr.encounterId ? ` · encounter ${ehr.encounterId}` : ''}. Agent tools are reading live EHR data.</>
+                : <>Session active — agent tools will read live EHR data.</>}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Agent */}
