@@ -91,6 +91,21 @@ writes, crypto, RBAC, audit) is never generated. The builder's tools have no
 code path to real data — generation runs outside the BAA boundary. See
 `../docs/LIVING_SOFTWARE.md`.
 
+### Builder auth: API key, or a Claude subscription for development
+
+Two transports, same tools/guardrails/audit:
+
+- **`ANTHROPIC_API_KEY` set** → Messages API (pay-per-token). Required in
+  production.
+- **No key, dev only** → the builder falls back to the **Claude Agent SDK**
+  (`agent/builderDev.js`), which uses Claude Code's login. Run
+  `claude /login` once with a Claude Pro/Max subscription and leave
+  `ANTHROPIC_API_KEY` unset (a set key overrides subscription auth). Agent
+  SDK usage draws from the plan's monthly credit pool instead of per-token
+  billing. Per Anthropic's terms this is for personal development only —
+  `NODE_ENV=production` refuses the fallback. `BUILDER_DEV_MODEL` optionally
+  overrides the model.
+
 ## Production checklist (not in code)
 
 - Host on a **HIPAA-eligible cloud with a signed BAA** — not GitHub Pages, not a

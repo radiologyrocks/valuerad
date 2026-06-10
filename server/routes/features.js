@@ -31,6 +31,7 @@ import {
 } from '../domain/feature.js';
 import { CATALOG, catalogEntry } from '../domain/catalog.js';
 import { proposeFeature, runBuilder } from '../agent/builder.js';
+import { runBuilderDev } from '../agent/builderDev.js';
 import { createClient } from '../agent/runner.js';
 
 const router = Router();
@@ -139,22 +140,34 @@ router.post('/features/request', approver, async (req, res) => {
   const { spec } = req.body ?? {};
   if (!spec || typeof spec !== 'string') return res.status(400).json({ error: 'spec (string) is required' });
 
-  const client = await createClient();
-  if (!client) {
-    return res.status(503).json({ error: 'builder_unavailable', detail: 'ANTHROPIC_API_KEY is not configured.' });
-  }
-
+  let client = null;
   try {
-    const result = await runBuilder({ spec, client, registry: featureRegistry, store, createdBy: req.user.id });
+    client = await createClient();
+    let result;
+    if (client) {
+      result = await runBuilder({ spec, client, registry: featureRegistry, store, createdBy: req.user.id });
+    } else if (process.env.NODE_ENV !== 'production') {
+      // Dev fallback: no API key → run over Claude Code subscription auth
+      // (Agent SDK). Dev-only per Anthropic ToS; production requires a key.
+      result = await runBuilderDev({ spec, registry: featureRegistry, store, createdBy: req.user.id });
+    } else {
+      return res.status(503).json({ error: 'builder_unavailable', detail: 'ANTHROPIC_API_KEY is not configured.' });
+    }
     return res.json({
       summary: result.summary,
       proposed: result.proposed.map(publicFeature),
       blocked: result.blocked,
+      ...(result.transport ? { transport: result.transport } : {}),
+      ...(result.costUsd != null ? { costUsd: result.costUsd } : {}),
       ...(result.refused ? { refused: true } : {}),
     });
   } catch (err) {
     console.error('[features] builder error:', err.message);
-    return res.status(500).json({ error: 'builder_error', detail: err.message });
+    if (client) return res.status(500).json({ error: 'builder_error', detail: err.message });
+    return res.status(503).json({
+      error: 'builder_unavailable',
+      detail: `${err.message} — set ANTHROPIC_API_KEY, or for development run \`claude /login\` with a Claude Pro/Max subscription and leave the key unset.`,
+    });
   }
 });
 

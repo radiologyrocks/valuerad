@@ -63,6 +63,50 @@ export const METRICS = {
   scorecard: { datasets: DSL_DATASETS, describe: 'CEO KPI scorecard; params.targets overrides per-KPI {target,direction}', run: (d, p) => scorecard(d, mergeTargets(p.targets)) },
 };
 
+/**
+ * The definition format, documented for the builder agent (and humans).
+ * Returned by the builder's list_metrics tool so the model composes against
+ * the real shape instead of guessing field names.
+ */
+export const DEFINITION_GUIDE = Object.freeze({
+  report: {
+    shape: '{ kind:"report", title, blocks:[{ id, metric, params?, filters?:[{dataset,field,op,value}] }], access?:{roles:[...]} }',
+    filterOps: FILTER_OPS,
+    example: {
+      kind: 'report',
+      title: 'MR turnaround vs 12h SLA',
+      blocks: [
+        { id: 'tat', metric: 'turnaroundTime', params: { slaHours: 12 }, filters: [{ dataset: 'studies', field: 'modality', op: 'eq', value: 'MR' }] },
+      ],
+      access: { roles: ['executive', 'admin'] },
+    },
+  },
+  export: {
+    shape: 'report shape + output:{ format:"csv", from:"blockId.path.to.array", columns:[{header,path}] }',
+    example: {
+      kind: 'export',
+      title: 'Denied dollars by payer',
+      blocks: [{ id: 'denials', metric: 'denialAnalytics' }],
+      output: { format: 'csv', from: 'denials.byPayer', columns: [{ header: 'Payer', path: 'payer' }, { header: 'Dollars', path: 'dollars' }] },
+    },
+  },
+  rule_pack: {
+    shape: '{ kind:"rule_pack", title, payerRules:{ [payerName]: { exempt?:[modality], require?:[modality] } }, access? }',
+    example: { kind: 'rule_pack', title: 'Medicare imaging rules', payerRules: { Medicare: { exempt: ['CT', 'MR'] } } },
+  },
+  ingest_mapper: {
+    shape: '{ kind:"ingest_mapper", title, dataset, columns:{ "Source Header":"targetField" }, transforms?:[{field,op:number|uppercase|lowercase|trim|date}], sampleCsv }',
+    example: {
+      kind: 'ingest_mapper',
+      title: 'RCM claims mapper',
+      dataset: 'claims',
+      columns: { 'Payer Name': 'payer', 'Billed': 'expected' },
+      transforms: [{ field: 'expected', op: 'number' }],
+      sampleCsv: 'Payer Name,Billed\nAetna,1200\n',
+    },
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Validation — every definition is schema-checked before it can be tested,
 // proposed, approved, or run. Returns an array of error strings (empty = valid).

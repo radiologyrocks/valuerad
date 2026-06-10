@@ -399,7 +399,7 @@ function LivingFeatures() {
       setMessage({
         ok: false,
         text: err.status === 503
-          ? 'The builder needs an ANTHROPIC_API_KEY on the backend. (It never sees PHI — generation runs on schema + synthetic fixtures only.)'
+          ? `${err.message} (The builder never sees PHI — generation runs on schema + synthetic fixtures only, so a Claude Pro/Max dev login works here.)`
           : err.message,
       });
     } finally {

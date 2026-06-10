@@ -12,14 +12,14 @@
  * EHR, which keeps the generation path outside the BAA boundary.
  */
 
-import { METRICS, DSL_DATASETS, ACCESS_ROLES, DEFINITION_KINDS, ENGINE_VERSION } from '../domain/dsl.js';
+import { METRICS, DSL_DATASETS, ACCESS_ROLES, DEFINITION_KINDS, ENGINE_VERSION, DEFINITION_GUIDE } from '../domain/dsl.js';
 import { evaluateFeature, runGoldenTests, classifyTier, contentHash } from '../domain/feature.js';
 import { GOLDEN, DATASET_FIELDS } from '../domain/fixtures.js';
 
 const MODEL = process.env.BUILDER_MODEL || process.env.AGENT_MODEL || 'claude-opus-4-8';
 const MAX_ITERATIONS = 10;
 
-const SYSTEM_PROMPT = `You are the feature builder for ValueRad, a radiology command center.
+export const BUILDER_SYSTEM_PROMPT = `You are the feature builder for ValueRad, a radiology command center.
 A user describes a report, export, payer rule pack, or CSV ingest mapping they need; you compose a declarative
 definition for the platform's trusted engine. You never write code — only definition data, which the engine
 validates, tests against synthetic fixtures, and a human must approve before it touches real data.
@@ -38,15 +38,26 @@ Rules:
 - If the request needs data or capabilities the engine doesn't have, do NOT force a wrong definition — explain what's missing instead.
 End with one short paragraph: what you proposed and what it shows.`;
 
+/** Tolerate definitions arriving as JSON strings (some transports stringify objects). */
+function coerceDefinition(definition) {
+  if (typeof definition !== 'string') return definition;
+  try {
+    return JSON.parse(definition);
+  } catch {
+    return definition;
+  }
+}
+
 export const BUILDER_TOOLS = {
   list_metrics: {
     kind: 'read',
-    description: 'List the metric library (the entire instruction set of the definition engine), the datasets each metric consumes, dataset field docs, definition kinds, and allowed access roles.',
+    description: 'List the metric library (the entire instruction set of the definition engine), the definition format with worked examples, the datasets each metric consumes, dataset field docs, definition kinds, and allowed access roles. ALWAYS call this before drafting a definition.',
     input_schema: { type: 'object', properties: {} },
     async handler() {
       return {
         engineVersion: ENGINE_VERSION,
         kinds: DEFINITION_KINDS,
+        definitionFormat: DEFINITION_GUIDE,
         datasets: DATASET_FIELDS,
         accessRoles: ACCESS_ROLES,
         metrics: Object.fromEntries(
@@ -80,9 +91,10 @@ export const BUILDER_TOOLS = {
       required: ['definition'],
     },
     async handler({ input }) {
-      const decision = evaluateFeature(input.definition);
+      const definition = coerceDefinition(input.definition);
+      const decision = evaluateFeature(definition);
       if (!decision.allow) return { ok: false, ...decision };
-      const evidence = runGoldenTests(input.definition);
+      const evidence = runGoldenTests(definition);
       return { ok: evidence.ok, tier: decision.tier, evidence };
     },
   },
@@ -130,6 +142,7 @@ function slugify(s) {
  * and hand-written features go through identical guardrails and evidence.
  */
 export async function proposeFeature({ name, featureKey, definition, spec, createdBy, registry }) {
+  definition = coerceDefinition(definition);
   const decision = evaluateFeature(definition);
   if (!decision.allow) {
     return { proposed: false, blocked: true, reason: decision.reason, errors: decision.errors ?? [] };
@@ -176,7 +189,7 @@ export async function runBuilder({ spec, client, registry, store, createdBy }) {
       model: MODEL,
       max_tokens: 16000,
       thinking: { type: 'adaptive' },
-      system: SYSTEM_PROMPT,
+      system: BUILDER_SYSTEM_PROMPT,
       tools: builderToolSchemas(),
       messages,
     });
