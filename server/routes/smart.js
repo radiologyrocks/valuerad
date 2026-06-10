@@ -32,6 +32,12 @@ const CLIENT_ID     = process.env.EPIC_CLIENT_ID     ?? 'YOUR_EPIC_CLIENT_ID';
 const CLIENT_SECRET = process.env.EPIC_CLIENT_SECRET ?? null; // public app = no secret
 const REDIRECT_URI  = process.env.EPIC_REDIRECT_URI  ?? 'https://valuerad.example.com/epic/callback';
 
+// Where to land the user after a successful EHR launch. For an embedded
+// Hyperspace launch this should be the Command Center. Set APP_BASE_URL when the
+// SPA is served from a different origin than this API.
+const APP_BASE_URL  = process.env.APP_BASE_URL ?? '';
+const POST_LAUNCH_PATH = '/?session=__SID__#/command-center';
+
 const LAUNCH_TTL_MS  = 10 * 60 * 1000;       // 10 min to complete the OAuth dance
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;   // 8 h working session
 const REFRESH_SKEW_MS = 60 * 1000;           // refresh 60s before expiry
@@ -152,7 +158,10 @@ router.get('/callback', async (req, res) => {
       outcome: 'success',
     });
 
-    return res.redirect(`/?session=${sessionId}`);
+    // Land the scheduler / auth specialist directly in the Command Center, with
+    // the session handle the SPA exchanges for EHR context (and sends as
+    // X-ValueRad-Session so the agent's tools read live Epic data).
+    return res.redirect(`${APP_BASE_URL}${POST_LAUNCH_PATH.replace('__SID__', sessionId)}`);
   } catch (err) {
     console.error('[callback] token exchange error:', err.message);
     return res.status(502).json({ error: 'token_exchange_failed', detail: err.message });

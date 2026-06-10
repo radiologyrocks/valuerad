@@ -39,4 +39,23 @@ export async function apiPost(path, body, { session } = {}) {
   return data;
 }
 
+export async function apiGet(path) {
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`);
+  } catch {
+    const err = new Error(`Could not reach the backend at ${API_BASE || 'this origin'}.`);
+    err.status = 0;
+    throw err;
+  }
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    const err = new Error(data?.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
 export { API_BASE };

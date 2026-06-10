@@ -1,11 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
-import { Activity, Bot, BarChart3, AlertTriangle, CheckCircle2, Clock, ShieldAlert } from 'lucide-react';
+import { Activity, Bot, BarChart3, AlertTriangle, CheckCircle2, Clock, ShieldAlert, Hospital, Gauge, Upload, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { apiPost, API_BASE } from '@/lib/api.js';
+import { apiPost, apiGet, API_BASE } from '@/lib/api.js';
+
+function patientName(patient) {
+  const n = patient?.name?.[0];
+  if (!n) return null;
+  return [n.given?.join(' '), n.family].filter(Boolean).join(' ') || n.text || null;
+}
 
 // Demo domain context the agent's read tools operate on when no live EHR
 // session is attached. With a SMART session, the backend swaps these for real
@@ -44,6 +50,17 @@ const DEMO_BI = {
   ],
 };
 
+const DATASETS = ['claims', 'appointments', 'studies', 'slots', 'referrals', 'referrals_prior'];
+
+const SAMPLE_CSV = {
+  claims: 'payer,status,expected,paid,arDays,denialReason\nAetna,paid,1000,1000,20,\nBCBS,denied,1200,0,95,No prior auth\nCigna,paid,800,640,42,',
+  slots: 'durationMin,status\n45,completed\n45,booked\n45,open\n45,noshow',
+  studies: 'modality,orderedAt,finalAt,radiologistId,rvu\nMR,2026-06-01T00:00:00Z,2026-06-01T30:00:00Z,dr-neuro,2.5\nCT,2026-06-01T00:00:00Z,2026-06-01T10:00:00Z,dr-body,1.8',
+  referrals: 'referrerId,referrerName\nr1,Dr A\nr1,Dr A\nr3,Dr C',
+  referrals_prior: 'referrerId,referrerName\nr1,Dr A\nr1,Dr A\nr1,Dr A\nr2,Dr B',
+  appointments: 'status\ncompleted\ncompleted\nnoshow\ncancelled',
+};
+
 const PRESETS = [
   'A patient needs an MRI of the brain. Verify eligibility, check no-show risk, find the best slot, and recommend next steps.',
   'A CT slot just opened at 10:30. Find the best waitlist patient to backfill it.',
@@ -71,12 +88,39 @@ const CommandCenter = () => {
   const [biError, setBiError] = useState(null);
   const [biLoading, setBiLoading] = useState(false);
 
+  // CEO scorecard + warehouse ingestion.
+  const [dataset, setDataset] = useState('claims');
+  const [csvText, setCsvText] = useState(SAMPLE_CSV.claims);
+  const [ingestMsg, setIngestMsg] = useState(null);
+  const [counts, setCounts] = useState(null);
+  const [card, setCard] = useState(null);
+  const [cardError, setCardError] = useState(null);
+  const [cardLoading, setCardLoading] = useState(false);
+
+  // EHR launch context — present when Epic launched us into this view.
+  const [session, setSession] = useState(null);
+  const [ehr, setEhr] = useState(null);
+
+  useEffect(() => {
+    const sid = new URLSearchParams(window.location.search).get('session');
+    if (!sid) return;
+    setSession(sid);
+    apiGet(`/epic/context?session=${encodeURIComponent(sid)}`)
+      .then(setEhr)
+      .catch(() => setEhr(null));
+  }, []);
+
+  useEffect(() => { refreshCounts(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const runAgent = async () => {
     setAgentLoading(true);
     setAgentError(null);
     setAgentResult(null);
     try {
-      const result = await apiPost('/api/agent/run', { task, mode, data: DEMO_DATA });
+      // When launched from Epic, send the live data (no demo fallback) and the
+      // session so the agent's tools read the real chart.
+      const body = session ? { task, mode } : { task, mode, data: DEMO_DATA };
+      const result = await apiPost('/api/agent/run', body, { session });
       setAgentResult(result);
     } catch (err) {
       setAgentError(err.status === 503
@@ -84,6 +128,42 @@ const CommandCenter = () => {
         : err.message);
     } finally {
       setAgentLoading(false);
+    }
+  };
+
+  const refreshCounts = async () => {
+    try { setCounts((await apiGet('/api/bi/warehouse')).counts); } catch { /* backend offline */ }
+  };
+
+  const ingestCsv = async () => {
+    setIngestMsg(null);
+    try {
+      const r = await apiPost('/api/bi/ingest', { dataset, format: 'csv', csv: csvText, replace: true });
+      setIngestMsg({ ok: true, text: `Ingested ${r.ingested} ${dataset} rows (${r.backend}).` });
+      refreshCounts();
+    } catch (err) {
+      setIngestMsg({ ok: false, text: err.message });
+    }
+  };
+
+  const onCsvFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setCsvText(String(reader.result));
+    reader.readAsText(file);
+  };
+
+  const loadScorecard = async () => {
+    setCardLoading(true);
+    setCardError(null);
+    setCard(null);
+    try {
+      setCard(await apiPost('/api/bi/scorecard', { source: 'warehouse' }));
+    } catch (err) {
+      setCardError(err.message);
+    } finally {
+      setCardLoading(false);
     }
   };
 
@@ -108,11 +188,23 @@ const CommandCenter = () => {
           <Activity className="w-7 h-7 text-primary" />
           <h1 className="text-3xl md:text-4xl font-bold" style={{ letterSpacing: '-0.02em' }}>Command Center</h1>
         </div>
-        <p className="text-muted-foreground mb-8 max-w-3xl">
+        <p className="text-muted-foreground mb-6 max-w-3xl">
           Drives the live backend ({API_BASE || 'same origin'}). The agent runs in{' '}
           <span className="font-medium">recommend mode</span> by default — it proposes actions, never mutates,
           until a capability earns autonomy. With a SMART session attached, its read tools hit the real EHR.
         </p>
+
+        {session && (
+          <div className="mb-8 flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+            <Hospital className="w-5 h-5 text-primary shrink-0" />
+            <div className="text-sm">
+              <span className="font-medium">Launched from Epic.</span>{' '}
+              {ehr?.patient
+                ? <>Patient context: <span className="font-medium">{patientName(ehr.patient) || ehr.patientId}</span>{ehr.encounterId ? ` · encounter ${ehr.encounterId}` : ''}. Agent tools are reading live EHR data.</>
+                : <>Session active — agent tools will read live EHR data.</>}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Agent */}
@@ -204,10 +296,87 @@ const CommandCenter = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* CEO scorecard + warehouse ingestion */}
+        <Card className="mt-6">
+          <CardHeader>
+            <div className="flex items-center gap-2"><Gauge className="w-5 h-5 text-primary" /><CardTitle className="text-xl">CEO scorecard</CardTitle></div>
+            <CardDescription>
+              KPIs vs targets with exception alerts. Feed it CSV extracts (RCM, RIS, payer remits) or a warehouse — same metric engine.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Ingest */}
+            <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+              <div className="flex items-center gap-2 text-sm font-medium"><Database className="w-4 h-4" /> Ingest data</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={dataset} onChange={(e) => { setDataset(e.target.value); setCsvText(SAMPLE_CSV[e.target.value] || ''); }} className="border rounded-md px-3 py-2 text-sm bg-background">
+                  {DATASETS.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+                <label className="text-sm inline-flex items-center gap-1.5 px-3 py-2 border rounded-md cursor-pointer hover:bg-muted">
+                  <Upload className="w-4 h-4" /> Choose CSV
+                  <input type="file" accept=".csv,text/csv" onChange={onCsvFile} className="hidden" />
+                </label>
+                <Button onClick={ingestCsv} variant="secondary">Ingest</Button>
+                {counts && <span className="text-xs text-muted-foreground">Loaded: {Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(' · ') || 'nothing yet'}</span>}
+              </div>
+              <Textarea value={csvText} onChange={(e) => setCsvText(e.target.value)} rows={4} className="text-foreground font-mono text-xs" />
+              {ingestMsg && (
+                <div className={`text-sm ${ingestMsg.ok ? 'text-green-600' : 'text-destructive'}`}>{ingestMsg.text}</div>
+              )}
+            </div>
+
+            {/* Scorecard */}
+            <div>
+              <Button onClick={loadScorecard} disabled={cardLoading}>{cardLoading ? 'Computing…' : 'Load scorecard'}</Button>
+              {cardError && (
+                <div className="mt-3 flex items-start gap-2 text-sm text-destructive bg-destructive/10 rounded-md p-3">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{cardError}</span>
+                </div>
+              )}
+              {card && (
+                <div className="mt-4 space-y-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {card.kpis.map((k) => <KpiTile key={k.key} kpi={k} />)}
+                  </div>
+                  {card.exceptions.length > 0 && (
+                    <div>
+                      <div className="text-sm font-medium mb-1 flex items-center gap-1.5"><AlertTriangle className="w-4 h-4 text-amber-600" /> Exception alerts</div>
+                      <ul className="space-y-1">
+                        {card.exceptions.map((e) => (
+                          <li key={e.key} className={`text-sm ${e.severity === 'high' ? 'text-destructive' : 'text-amber-600'}`}>• {e.message}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </>
   );
 };
+
+const STATUS_STYLES = {
+  ok: 'border-green-500/40 bg-green-500/5',
+  warn: 'border-amber-500/50 bg-amber-500/10',
+  breach: 'border-destructive/50 bg-destructive/10',
+};
+
+function KpiTile({ kpi }) {
+  const v = kpi.variancePct;
+  return (
+    <div className={`rounded-lg border p-3 ${STATUS_STYLES[kpi.status] || ''}`}>
+      <div className="text-xl font-bold">{kpi.value}{kpi.unit}</div>
+      <div className="text-xs font-medium">{kpi.label}</div>
+      <div className="text-xs text-muted-foreground mt-1">
+        target {kpi.target}{kpi.unit}{v != null ? ` · ${v > 0 ? '+' : ''}${v}%` : ''}
+      </div>
+    </div>
+  );
+}
 
 function ResultList({ icon: Icon, title, items, tone }) {
   if (!items || items.length === 0) return null;
