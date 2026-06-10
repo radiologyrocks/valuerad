@@ -22,6 +22,8 @@ if (!DATABASE_URL) {
   const { featureRegistry, featureRegistryBackend } = await import('../../lib/features.js');
   const { principals, principalsBackend } = await import('../../lib/principals.js');
   const { transitionFeature } = await import('../../domain/feature.js');
+  const { supplies, suppliesBackend } = await import('../../lib/supplies.js');
+  const { transitionOrder } = await import('../../domain/supply.js');
 
   test('pg: schema migrates idempotently and the postgres backends are selected', async () => {
     await migrate();
@@ -31,8 +33,10 @@ if (!DATABASE_URL) {
     assert.equal(featureRegistryBackend, 'postgres');
     assert.equal(principalsBackend, 'postgres');
 
+    assert.equal(suppliesBackend, 'postgres');
+
     // clean slate for this run
-    await pool.query('TRUNCATE wh_facts, living_features, service_principals RESTART IDENTITY');
+    await pool.query('TRUNCATE wh_facts, living_features, service_principals, supply_items, supply_lots, supply_events, supply_orders RESTART IDENTITY CASCADE');
   });
 
   test('pg: audit log appends and reads back', async () => {
@@ -102,6 +106,37 @@ if (!DATABASE_URL) {
     // token is stored hashed, never in plaintext
     const { rows } = await pool.query(`SELECT token_hash FROM service_principals WHERE name = 'it-bot'`);
     assert.notEqual(rows[0].token_hash, token);
+  });
+
+  test('pg: supply items/lots upsert semantics, movement ledger, order lifecycle', async () => {
+    const item = await supplies.upsertItem({ gtin: '00380740000011', name: 'Contrast', pack_size: 10, unit_cost: 25, par_level: 30, reorder_point: 12, restricted: true });
+    // upsert is idempotent on gtin
+    const again = await supplies.upsertItem({ gtin: '00380740000011', name: 'Contrast 350', pack_size: 10, unit_cost: 25, par_level: 30, reorder_point: 12, restricted: true });
+    assert.equal(again.id, item.id);
+    assert.equal(again.name, 'Contrast 350');
+
+    await supplies.adjustLot(item.id, 'L1', '2027-03-31', 10);
+    await supplies.adjustLot(item.id, 'L1', '2027-03-31', -4); // same lot accumulates
+    const lots = await supplies.lotsForItem(item.id);
+    assert.equal(lots.length, 1);
+    assert.equal(lots[0].qty, 6);
+    assert.equal(lots[0].expiry, '2027-03-31');
+
+    await supplies.recordEvent({ itemId: item.id, lot: 'L1', action: 'use', qty: 4, actor: 'it-test' });
+    assert.equal((await supplies.eventsForItem(item.id)).length, 1);
+
+    const order = await supplies.createOrder({
+      lines: [{ itemId: item.id, gtin: item.gtin, name: again.name, qty: 30, unitCost: 25, lineTotal: 750, restricted: true }],
+      total_cost: 750, vendor: 'McKesson', created_by: 'it-test',
+      history: [{ from: null, to: 'proposed' }],
+    });
+    // pg returns BIGSERIAL ids as strings; the store normalizes with Number()
+    assert.equal((await supplies.openOrderItemIds()).includes(Number(item.id)), true);
+
+    const approved = await supplies.updateOrder(order.id, { ...transitionOrder(order, 'approved', { by: 'it-test' }), approved_by: 'it-test' });
+    assert.equal(approved.status, 'approved');
+    assert.equal(approved.history.length, 2);
+    assert.equal((await supplies.listOrders({ status: 'approved' })).length, 1);
   });
 
   test('pg: teardown', async () => {

@@ -24,6 +24,7 @@ Dev identity: requests need `X-ValueRad-User` / `X-ValueRad-Roles` headers
 - `server/domain/` — pure, dependency-free business logic. Unit-test everything here.
   - `bi.js` metric library · `dsl.js` definition engine · `feature.js` lifecycle/tier/harness
   - `priorauth.js`, `scheduling.js`, `eligibility.js`, `worklist.js` · `fixtures.js` golden data
+  - `supply.js` GS1/UDI parsing, stock math, order lifecycle + gates (docs/SUPPLY_CHAIN.md)
 - `server/agent/` — the agents. `runner.js`/`builder.js` (Messages API),
   `runnerDev.js`/`builderDev.js` (dev-only Claude-subscription transport via Agent SDK).
   `tools.js` action plane · `policy.js` guardrail plane.

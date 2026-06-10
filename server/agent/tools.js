@@ -14,6 +14,7 @@ import { noShowRisk, rankSlots, bestBackfill } from '../domain/scheduling.js';
 import { evaluateEligibility } from '../domain/eligibility.js';
 import { authRequired, AUTH_STATES, safeToPerform } from '../domain/priorauth.js';
 import { routeStudy } from '../domain/worklist.js';
+import { stockStatus, proposeReorder, evaluateSupplyOrder } from '../domain/supply.js';
 
 export const TOOLS = {
   find_open_slots: {
@@ -127,7 +128,71 @@ export const TOOLS = {
     },
   },
 
+  check_supply_levels: {
+    kind: 'read',
+    description:
+      'Check supply inventory: items at/below their reorder point and lots expiring soon. Call when asked about supplies, stock, contrast, or before proposing a supply order.',
+    input_schema: { type: 'object', properties: {} },
+    async handler({ services }) {
+      if (!services.supplies) return { items: [], note: 'supply store not attached' };
+      const items = await services.supplies.listItems();
+      const statuses = [];
+      for (const item of items) {
+        const [lots, events] = await Promise.all([
+          services.supplies.lotsForItem(item.id),
+          services.supplies.eventsForItem(item.id),
+        ]);
+        statuses.push(stockStatus(item, lots, events));
+      }
+      return {
+        belowReorder: statuses.filter((s) => s.belowReorder),
+        expiring: statuses.filter((s) => s.expiring.length > 0).map((s) => ({ name: s.name, lots: s.expiring })),
+        totalItems: statuses.length,
+      };
+    },
+  },
+
   // ---- write tools (mutating; gated by policy) ----
+
+  propose_supply_order: {
+    kind: 'write',
+    description:
+      'Create a PROPOSED supply order for an item that is at/below its reorder point. The order still passes policy gates and (for restricted or high-dollar items) human confirmation before any money moves.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        gtin: { type: 'string', description: 'the item GTIN' },
+        qty: { type: 'integer', description: 'override quantity; defaults to the computed reorder amount' },
+      },
+      required: ['gtin'],
+    },
+    async handler({ input, services }) {
+      if (!services.supplies) return { proposed: false, reason: 'supply store not attached' };
+      const item = await services.supplies.getItemByGtin(input.gtin);
+      if (!item) return { proposed: false, reason: 'unknown_item' };
+      const [lots, events, openIds] = await Promise.all([
+        services.supplies.lotsForItem(item.id),
+        services.supplies.eventsForItem(item.id),
+        services.supplies.openOrderItemIds(),
+      ]);
+      let line = proposeReorder(item, lots, events);
+      if (input.qty) {
+        const unitCost = Number(item.unit_cost) || 0;
+        line = { itemId: item.id, gtin: item.gtin, name: item.name, qty: input.qty, unitCost, lineTotal: Number((input.qty * unitCost).toFixed(2)), restricted: Boolean(item.restricted) };
+      }
+      if (!line) return { proposed: false, reason: 'above_reorder_point' };
+      const draft = { lines: [line], total_cost: line.lineTotal };
+      const decision = evaluateSupplyOrder(draft, { openOrderItemIds: openIds });
+      if (!decision.allow) return { proposed: false, blocked: true, reason: decision.reason };
+      const order = await services.supplies.createOrder({
+        ...draft,
+        vendor: item.vendor,
+        created_by: 'agent',
+        history: [{ from: null, to: 'proposed', at: new Date().toISOString(), by: 'agent', gate: decision.reason }],
+      });
+      return { proposed: true, orderId: order.id, total: line.lineTotal, requiresHumanApproval: decision.requiresHumanApproval, gate: decision.reason };
+    },
+  },
 
   book_appointment: {
     kind: 'write',
