@@ -44,7 +44,16 @@ encrypted store.
 | PUT  | `/epic/fhir/:resource/:id` | audited update |
 | POST | `/api/leads` | storefront lead capture |
 | POST | `/api/agent/run` | run the command-center agent (recommend mode default; 503 without `ANTHROPIC_API_KEY`) |
-| POST | `/api/bi/snapshot` | executive BI snapshot (executive/admin role) |
+| POST | `/api/bi/ingest` | ingest a dataset from CSV or JSON into the warehouse (executive/admin) |
+| GET  | `/api/bi/warehouse` | row counts per dataset |
+| POST | `/api/bi/snapshot` | executive BI snapshot (inline body or `{source:"warehouse"}`) |
+| POST | `/api/bi/scorecard` | CEO KPI scorecard with targets, variance, and exception alerts |
+| POST | `/api/bi/report` | full CEO report (snapshot + denials, A/R, referrals, turnaround, productivity, funnel) |
+
+BI works two ways from the same metric engine (`domain/bi.js`): **CSV/JSON
+extracts** (no integrations needed — upload RCM/RIS/payer-remit exports) and a
+**durable warehouse** (`lib/warehouse.js`, Postgres or dev-memory). Datasets:
+`claims`, `appointments`, `studies`, `slots`, `referrals`, `referrals_prior`.
 
 ## Stages implemented
 

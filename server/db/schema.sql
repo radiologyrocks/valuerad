@@ -87,3 +87,16 @@ CREATE TABLE IF NOT EXISTS leads (
   message      TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- BI warehouse — a generic fact store. Each row is one record (claim,
+-- appointment, study, referral, slot) tagged by `dataset`, ingested from CSV
+-- extracts or direct JSON. The metric engine (domain/bi.js) queries by dataset.
+CREATE TABLE IF NOT EXISTS wh_facts (
+  id          BIGSERIAL PRIMARY KEY,
+  dataset     TEXT NOT NULL,
+  payload     JSONB NOT NULL,
+  source      TEXT,
+  ingested_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS wh_facts_dataset_idx ON wh_facts (dataset);
+
