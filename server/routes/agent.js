@@ -16,6 +16,7 @@ import { queue } from '../lib/jobs.js';
 import { FhirClient, SchedulingClient } from '../lib/fhir.js';
 import { requireRole, ROLES } from '../lib/rbac.js';
 import { loadActiveRulePack } from '../lib/features.js';
+import { supplies } from '../lib/supplies.js';
 
 const router = Router();
 
@@ -59,6 +60,7 @@ router.post('/agent/run', requireRole(ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.SCHEDU
     scheduling,
     fhir,
     rulePack,
+    supplies,
     ...data,
   };
 

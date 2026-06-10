@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
-import { Activity, Bot, BarChart3, AlertTriangle, CheckCircle2, Clock, ShieldAlert, Hospital, Gauge, Upload, Database, Sparkles, Play, RotateCcw, PackagePlus } from 'lucide-react';
+import { Activity, Bot, BarChart3, AlertTriangle, CheckCircle2, Clock, ShieldAlert, Hospital, Gauge, Upload, Database, Sparkles, Play, RotateCcw, PackagePlus, ScanLine, Camera } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -356,10 +356,230 @@ const CommandCenter = () => {
         </Card>
 
         <LivingFeatures />
+        <Supplies />
       </div>
     </>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Supplies — UDI/GS1 scanning (phone camera or wedge scanner, same intake)
+// and gated automated ordering. See docs/SUPPLY_CHAIN.md.
+// ---------------------------------------------------------------------------
+
+function Supplies() {
+  const [code, setCode] = useState('');
+  const [action, setAction] = useState('use');
+  const [items, setItems] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [msg, setMsg] = useState(null);
+  const [unknown, setUnknown] = useState(null); // parsed payload of an unregistered GTIN
+  const [reg, setReg] = useState({ name: '', parLevel: 10, reorderPoint: 4, packSize: 1, unitCost: 0, restricted: false });
+  const [scanning, setScanning] = useState(false);
+  const videoRef = React.useRef(null);
+  const cameraSupported = typeof window !== 'undefined' && 'BarcodeDetector' in window;
+
+  const refresh = async () => {
+    try {
+      const r = await apiGet('/api/supplies');
+      setItems(r.items);
+      setOrders(r.openOrders);
+    } catch { /* backend offline */ }
+  };
+  useEffect(() => { refresh(); }, []);
+
+  const submitScan = async (value) => {
+    setMsg(null);
+    setUnknown(null);
+    try {
+      const r = await apiPost('/api/supplies/scan', { code: value, action });
+      setMsg({
+        ok: true,
+        text: `${action === 'use' ? 'Used' : 'Received'} ${r.qty} × ${r.item.name} — on hand ${r.stock.onHand}` +
+          (r.reorder ? ` · auto-proposed order #${r.reorder.id} ($${r.reorder.total_cost})${r.reorder.status === 'approved' ? ' — auto-approved by gates' : ' — awaiting confirmation'}` : ''),
+      });
+      setCode('');
+      refresh();
+    } catch (err) {
+      if (err.status === 404 && err.data?.parsed) {
+        setUnknown(err.data.parsed);
+        setMsg({ ok: false, text: `Unknown item (GTIN ${err.data.parsed.gtin}) — register it below.` });
+      } else {
+        setMsg({ ok: false, text: err.message });
+      }
+    }
+  };
+
+  const registerItem = async () => {
+    try {
+      await apiPost('/api/supplies/items', {
+        gtin: unknown.gtin, name: reg.name, par_level: Number(reg.parLevel),
+        reorder_point: Number(reg.reorderPoint), pack_size: Number(reg.packSize),
+        unit_cost: Number(reg.unitCost), restricted: reg.restricted,
+      });
+      setMsg({ ok: true, text: `Registered ${reg.name}. Scan it again to record stock.` });
+      setUnknown(null);
+      refresh();
+    } catch (err) {
+      setMsg({ ok: false, text: err.message });
+    }
+  };
+
+  const orderAction = async (o, act, label) => {
+    try {
+      await apiPost(`/api/supplies/orders/${o.id}/${act}`, {});
+      setMsg({ ok: true, text: label });
+      refresh();
+    } catch (err) {
+      setMsg({ ok: false, text: err.message });
+    }
+  };
+
+  // Phone-camera scanning via the BarcodeDetector API (DataMatrix is what
+  // UDI labels carry). A wedge scanner needs none of this — it types into
+  // the same input and submits on Enter.
+  const startCamera = async () => {
+    setScanning(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const video = videoRef.current;
+      video.srcObject = stream;
+      await video.play();
+      const detector = new window.BarcodeDetector({ formats: ['data_matrix', 'code_128', 'ean_13', 'upc_a', 'qr_code'] });
+      const tick = async () => {
+        if (!video.srcObject) return;
+        try {
+          const codes = await detector.detect(video);
+          if (codes.length > 0) {
+            stopCamera();
+            setCode(codes[0].rawValue);
+            await submitScan(codes[0].rawValue);
+            return;
+          }
+        } catch { /* keep scanning */ }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    } catch (err) {
+      setScanning(false);
+      setMsg({ ok: false, text: `Camera unavailable: ${err.message}` });
+    }
+  };
+
+  const stopCamera = () => {
+    const video = videoRef.current;
+    if (video?.srcObject) {
+      video.srcObject.getTracks().forEach((t) => t.stop());
+      video.srcObject = null;
+    }
+    setScanning(false);
+  };
+
+  return (
+    <Card className="mt-6">
+      <CardHeader>
+        <div className="flex items-center gap-2"><ScanLine className="w-5 h-5 text-primary" /><CardTitle className="text-xl">Supplies</CardTitle></div>
+        <CardDescription>
+          Scan UDI/GS1 barcodes with the phone camera or any wedge scanner (it types into the same field).
+          Consumption below the reorder point auto-proposes a gated order — restricted and high-dollar
+          orders always wait for your confirmation.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* Scan intake */}
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={action} onChange={(e) => setAction(e.target.value)} className="border rounded-md px-3 py-2 text-sm bg-background">
+            <option value="use">Use (consume)</option>
+            <option value="receive">Receive (stock in)</option>
+          </select>
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && code.trim()) submitScan(code.trim()); }}
+            placeholder="Scan or type a GS1/UDI code… e.g. (01)00380740000011(17)270331(10)A123"
+            className="flex-1 min-w-64 border rounded-md px-3 py-2 text-sm bg-background font-mono"
+          />
+          <Button onClick={() => code.trim() && submitScan(code.trim())} variant="secondary">Submit</Button>
+          {cameraSupported && (
+            <Button onClick={scanning ? stopCamera : startCamera} variant={scanning ? 'destructive' : 'default'}>
+              <Camera className="w-4 h-4 mr-1" />{scanning ? 'Stop' : 'Camera'}
+            </Button>
+          )}
+        </div>
+        <video ref={videoRef} className={`rounded-lg border w-full max-w-sm ${scanning ? '' : 'hidden'}`} muted playsInline />
+        {!cameraSupported && (
+          <div className="text-xs text-muted-foreground">Camera scanning needs a Chromium-based browser (BarcodeDetector API); the input field works everywhere.</div>
+        )}
+
+        {msg && <div className={`text-sm rounded-md p-3 ${msg.ok ? 'bg-muted/50' : 'text-destructive bg-destructive/10'}`}>{msg.text}</div>}
+
+        {/* Register an unknown item */}
+        {unknown && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-2">
+            <div className="text-sm font-medium">Register GTIN {unknown.gtin}{unknown.lot ? ` (lot ${unknown.lot}${unknown.expiry ? `, exp ${unknown.expiry}` : ''})` : ''}</div>
+            <div className="flex flex-wrap gap-2 text-sm">
+              <input placeholder="Item name" value={reg.name} onChange={(e) => setReg({ ...reg, name: e.target.value })} className="border rounded-md px-2 py-1.5 bg-background flex-1 min-w-48" />
+              {[['parLevel', 'Par'], ['reorderPoint', 'Reorder at'], ['packSize', 'Pack'], ['unitCost', '$/unit']].map(([k, label]) => (
+                <label key={k} className="flex items-center gap-1 text-xs text-muted-foreground">{label}
+                  <input type="number" value={reg[k]} onChange={(e) => setReg({ ...reg, [k]: e.target.value })} className="border rounded-md px-2 py-1.5 w-20 bg-background text-foreground text-sm" />
+                </label>
+              ))}
+              <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={reg.restricted} onChange={(e) => setReg({ ...reg, restricted: e.target.checked })} /> restricted (always needs approval)</label>
+            </div>
+            <Button size="sm" onClick={registerItem} disabled={!reg.name}>Register</Button>
+          </div>
+        )}
+
+        {/* Stock */}
+        {items.length > 0 && (
+          <div className="space-y-1">
+            <div className="text-sm font-medium">Stock ({items.length})</div>
+            {items.map((s) => (
+              <div key={s.itemId} className="flex flex-wrap items-center gap-2 text-sm rounded-lg border p-2.5">
+                <span className="font-medium">{s.name}</span>
+                <span className="text-xs text-muted-foreground">on hand {s.onHand}{s.daysOfSupply != null ? ` · ~${s.daysOfSupply}d supply` : ''} · reorder at {s.reorderPoint}</span>
+                {s.restricted && <Badge variant="secondary">restricted</Badge>}
+                {s.belowReorder && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700">below reorder</span>}
+                {s.expiring.length > 0 && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-destructive/15 text-destructive">
+                    {s.expiring.some((l) => l.expired) ? 'EXPIRED lot' : `expiring: ${s.expiring[0].expiry}`}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Open orders */}
+        {orders.length > 0 && (
+          <div className="space-y-1">
+            <div className="text-sm font-medium">Open orders ({orders.length})</div>
+            {orders.map((o) => (
+              <div key={o.id} className="flex flex-wrap items-center gap-2 text-sm rounded-lg border p-2.5">
+                <span className="font-medium">#{o.id} {o.lines.map((l) => `${l.qty} × ${l.name}`).join(', ')}</span>
+                <span className="text-xs text-muted-foreground">${o.total_cost}{o.vendor ? ` · ${o.vendor}` : ''} · by {o.created_by}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${o.status === 'proposed' ? 'bg-amber-500/15 text-amber-700' : o.status === 'approved' ? 'bg-blue-500/15 text-blue-700' : 'bg-green-500/15 text-green-700'}`}>{o.status}</span>
+                <span className="flex-1" />
+                {o.status === 'proposed' && (
+                  <>
+                    <Button size="sm" variant="secondary" onClick={() => orderAction(o, 'approve', `Order #${o.id} confirmed.`)}><CheckCircle2 className="w-3.5 h-3.5 mr-1" />Confirm</Button>
+                    <Button size="sm" variant="ghost" onClick={() => orderAction(o, 'cancel', `Order #${o.id} cancelled.`)}>Cancel</Button>
+                  </>
+                )}
+                {o.status === 'approved' && (
+                  <Button size="sm" onClick={() => orderAction(o, 'place', `Order #${o.id} sent to vendor.`)}>Place</Button>
+                )}
+                {o.status === 'placed' && (
+                  <Button size="sm" variant="secondary" onClick={() => orderAction(o, 'receive', `Order #${o.id} marked received — scan items in.`)}>Mark received</Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Living features — request, approve, run, roll back (docs/LIVING_SOFTWARE.md)

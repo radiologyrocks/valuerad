@@ -161,6 +161,35 @@ export function buildMcpTools(api = callApi) {
       shape: {},
       handler: () => api('GET', '/api/evals'),
     },
+    scan_supply: {
+      description: 'Scan a supply barcode (GS1/UDI DataMatrix string, bracketed GS1, or plain GTIN) to receive stock in or consume it out. Consumption below the reorder point auto-proposes a gated reorder.',
+      shape: {
+        code: z.string().describe('the scanned barcode content'),
+        action: z.enum(['receive', 'use']).optional().describe('default receive'),
+        qty: z.number().int().optional(),
+      },
+      handler: ({ code, action, qty }) => api('POST', '/api/supplies/scan', { code, action: action ?? 'receive', qty }),
+    },
+    supply_status: {
+      description: 'Inventory dashboard: on-hand, days of supply, items below reorder, expiring lots, and open orders.',
+      shape: {},
+      handler: () => api('GET', '/api/supplies'),
+    },
+    propose_supply_orders: {
+      description: 'Sweep the shelf: create proposed orders for every item at/below its reorder point (skipping items already on order). Orders await gates/human confirmation.',
+      shape: {},
+      handler: () => api('POST', '/api/supplies/orders/propose', {}),
+    },
+    approve_supply_order: {
+      description: 'Confirm a proposed supply order (gates re-checked: restricted items and high-dollar totals require this human/principal sign-off; duplicates and budget breaches are blocked).',
+      shape: { id: z.number() },
+      handler: ({ id }) => api('POST', `/api/supplies/orders/${id}/approve`, {}),
+    },
+    place_supply_order: {
+      description: 'Send an approved supply order to the vendor (enqueues the vendor-integration job).',
+      shape: { id: z.number() },
+      handler: ({ id }) => api('POST', `/api/supplies/orders/${id}/place`, {}),
+    },
   };
 }
 

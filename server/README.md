@@ -63,6 +63,11 @@ encrypted store.
 | POST | `/api/features/revalidate` | re-run golden tests on all active features (upgrade gate) |
 | GET  | `/api/evals` | deterministic eval suite: metric coverage + catalog output regression + seam coverage |
 | GET/POST | `/api/principals` · `/:id/revoke` | service principals — first-class machine identities (admin) |
+| POST | `/api/supplies/scan` | UDI/GS1 scan intake (phone camera, wedge scanner, or manual — one parser) |
+| GET  | `/api/supplies` | stock by lot: on-hand, days of supply, expiring, open orders |
+| POST | `/api/supplies/items` | register/configure an item (par, reorder point, restricted…) |
+| POST | `/api/supplies/orders/propose` | sweep the shelf: gated reorder proposals |
+| POST | `/api/supplies/orders/:id/approve` · `/place` · `/receive` · `/cancel` | order lifecycle (gates re-run at confirmation; placing enqueues the vendor job) |
 
 BI works two ways from the same metric engine (`domain/bi.js`): **CSV/JSON
 extracts** (no integrations needed — upload RCM/RIS/payer-remit exports) and a

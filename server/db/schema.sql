@@ -147,3 +147,60 @@ CREATE TABLE IF NOT EXISTS service_principals (
   last_used_at TIMESTAMPTZ
 );
 
+-- Supply chain — UDI/GS1-native inventory and gated automated ordering.
+-- Items are the configured catalog (par levels, costs, vendor); lots carry
+-- expiry-tracked stock; events are the append-only movement ledger (every
+-- scan); orders run a lifecycle with policy gates before money moves.
+CREATE TABLE IF NOT EXISTS supply_items (
+  id             BIGSERIAL PRIMARY KEY,
+  gtin           TEXT UNIQUE NOT NULL,
+  name           TEXT NOT NULL,
+  category       TEXT,            -- contrast | catheter | ppe | pharma | other
+  unit           TEXT,            -- vial | each | box
+  pack_size      INT NOT NULL DEFAULT 1,
+  unit_cost      NUMERIC NOT NULL DEFAULT 0,
+  par_level      INT NOT NULL DEFAULT 0,
+  reorder_point  INT NOT NULL DEFAULT 0,
+  lead_time_days INT NOT NULL DEFAULT 7,
+  vendor         TEXT,
+  restricted     BOOLEAN NOT NULL DEFAULT false, -- always needs human approval
+  is_active      BOOLEAN NOT NULL DEFAULT true,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS supply_lots (
+  id         BIGSERIAL PRIMARY KEY,
+  item_id    BIGINT NOT NULL REFERENCES supply_items(id) ON DELETE CASCADE,
+  lot        TEXT NOT NULL DEFAULT '',
+  expiry     DATE,
+  qty        INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (item_id, lot, expiry)
+);
+
+CREATE TABLE IF NOT EXISTS supply_events (
+  id      BIGSERIAL PRIMARY KEY,
+  at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  item_id BIGINT NOT NULL REFERENCES supply_items(id) ON DELETE CASCADE,
+  lot     TEXT,
+  action  TEXT NOT NULL,   -- receive | use | adjust
+  qty     INT NOT NULL,
+  actor   TEXT,
+  detail  JSONB
+);
+CREATE INDEX IF NOT EXISTS supply_events_item_idx ON supply_events (item_id, at);
+
+CREATE TABLE IF NOT EXISTS supply_orders (
+  id          BIGSERIAL PRIMARY KEY,
+  status      TEXT NOT NULL DEFAULT 'proposed', -- proposed|approved|placed|received|cancelled
+  lines       JSONB NOT NULL,                   -- [{itemId, gtin, name, qty, unitCost, lineTotal, restricted}]
+  total_cost  NUMERIC NOT NULL DEFAULT 0,
+  vendor      TEXT,
+  created_by  TEXT,
+  approved_by TEXT,
+  history     JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS supply_orders_status_idx ON supply_orders (status);
+

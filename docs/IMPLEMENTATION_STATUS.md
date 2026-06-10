@@ -99,6 +99,21 @@ injected client; `POST /api/agent/run` returns 503 until the key is set.
 | Eval suite: metric coverage + catalog regression + seams | `domain/evals.js`, `npm run eval` | `test/evals.test.js` |
 | Subscription dev transports for both agents | `agent/runnerDev.js`, `agent/builderDev.js` | `test/runnerDev.test.js`, `test/builderDev.test.js` |
 
+## Supply chain (docs/SUPPLY_CHAIN.md) ✅ in code
+| Capability | Module | Tests |
+|---|---|---|
+| GS1/UDI parser (camera, wedge scanner, manual — one intake) | `domain/supply.js` (`parseGs1`) | `test/supply.test.js` |
+| Lot/expiry stock, FEFO, usage rate, reorder math | `domain/supply.js` | `test/supply.test.js` |
+| Order lifecycle state machine + gates (restricted/high-dollar/duplicate/budget) | `domain/supply.js` | `test/supply.test.js` |
+| Store (Postgres + dev memory) | `lib/supplies.js`, `db/schema.sql` | `test/supply.test.js`, `test/integration/` |
+| Scan intake, auto-propose on reorder trip, confirm/place/receive API | `routes/supplies.js` | smoke-tested |
+| Agent senses + hands (`check_supply_levels`, `propose_supply_order`) | `agent/tools.js` | `test/supply.test.js` |
+| MCP tools (scan, status, propose, approve, place) | `mcp.js` | `test/mcp.test.js` |
+| Camera scanning (BarcodeDetector) + wedge/manual UI, orders panel | `src/pages/CommandCenter.jsx` | — |
+
+**Needs live wiring:** vendor connectivity behind the `place_supply_order`
+job (EDI 850 / punchout / distributor email).
+
 **Needs live wiring:** `ANTHROPIC_API_KEY` for the builder (no BAA needed on
 this path — the builder only ever sees schema docs and synthetic fixtures),
 and the same IdP/Postgres production prerequisites as Stage 0.
