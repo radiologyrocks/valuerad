@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
-import { Activity, Bot, BarChart3, AlertTriangle, CheckCircle2, Clock, ShieldAlert, Hospital, Gauge, Upload, Database } from 'lucide-react';
+import { Activity, Bot, BarChart3, AlertTriangle, CheckCircle2, Clock, ShieldAlert, Hospital, Gauge, Upload, Database, Network, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -61,6 +61,15 @@ const SAMPLE_CSV = {
   appointments: 'status\ncompleted\ncompleted\nnoshow\ncancelled',
 };
 
+const SCENARIOS = [
+  { label: 'Renegotiate Aetna → 160% Medicare', levers: [{ op: 'setContract', payer: 'Aetna', rate: { type: 'pct_of_medicare', pct: 160 } }] },
+  { label: 'Grow MRI volume +20%', levers: [{ op: 'scaleVolume', match: { modality: 'MR' }, factor: 1.2 }] },
+  { label: 'Add a second MRI scanner', levers: [{ op: 'addScanner', scanner: { id: 'mr2', site: 'main', modality: 'MR', minutesPerDay: 600, daysPerMonth: 22, fixedCostMonthly: 32000 } }] },
+  { label: 'Walk away from CT Medicaid', levers: [{ op: 'dropPayer', payer: 'Medicaid_CT' }] },
+];
+
+const money = (n) => `$${Math.round(n).toLocaleString()}`;
+
 const PRESETS = [
   'A patient needs an MRI of the brain. Verify eligibility, check no-show risk, find the best slot, and recommend next steps.',
   'A CT slot just opened at 10:30. Find the best waitlist patient to backfill it.',
@@ -96,6 +105,12 @@ const CommandCenter = () => {
   const [card, setCard] = useState(null);
   const [cardError, setCardError] = useState(null);
   const [cardLoading, setCardLoading] = useState(false);
+
+  // Practice income model + what-if.
+  const [pnl, setPnl] = useState(null);
+  const [scenario, setScenario] = useState(null);
+  const [modelError, setModelError] = useState(null);
+  const [modelLoading, setModelLoading] = useState(false);
 
   // EHR launch context — present when Epic launched us into this view.
   const [session, setSession] = useState(null);
@@ -164,6 +179,33 @@ const CommandCenter = () => {
       setCardError(err.message);
     } finally {
       setCardLoading(false);
+    }
+  };
+
+  const loadModel = async () => {
+    setModelLoading(true);
+    setModelError(null);
+    setScenario(null);
+    try {
+      setPnl((await apiPost('/api/practice/model', {})).pnl);
+    } catch (err) {
+      setModelError(err.message);
+    } finally {
+      setModelLoading(false);
+    }
+  };
+
+  const runScenario = async (levers) => {
+    setModelLoading(true);
+    setModelError(null);
+    try {
+      const r = await apiPost('/api/practice/scenario', { levers });
+      setScenario(r);
+      setPnl(r.baseline);
+    } catch (err) {
+      setModelError(err.message);
+    } finally {
+      setModelLoading(false);
     }
   };
 
@@ -354,10 +396,68 @@ const CommandCenter = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Practice income model — hypergraph what-if */}
+        <Card className="mt-6">
+          <CardHeader>
+            <div className="flex items-center gap-2"><Network className="w-5 h-5 text-primary" /><CardTitle className="text-xl">Practice income model</CardTitle></div>
+            <CardDescription>
+              The practice as a hypergraph (exams · payers · scanners · radiologists). Predict income under change — CT/Medicare defaults, fully customizable.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={loadModel} disabled={modelLoading} variant="secondary">{modelLoading ? 'Computing…' : 'Baseline P&L'}</Button>
+              {SCENARIOS.map((s, i) => (
+                <button key={i} onClick={() => runScenario(s.levers)} disabled={modelLoading} className="text-xs px-3 py-2 rounded-full border hover:bg-muted transition-colors disabled:opacity-50">
+                  {s.label}
+                </button>
+              ))}
+            </div>
+
+            {modelError && (
+              <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 rounded-md p-3">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{modelError}</span>
+              </div>
+            )}
+
+            {pnl && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Stat label="Monthly revenue" value={money(pnl.revenue)} />
+                <Stat label="Net income" value={money(pnl.net)} sub={`${pnl.marginPct}% margin`} />
+                <Stat label="wRVU / month" value={Math.round(pnl.wRvu).toLocaleString()} sub={pnl.wRvuUtilizationPct != null ? `${pnl.wRvuUtilizationPct}% of capacity` : undefined} />
+                <Stat label="Revenue lost to capacity" value={money(pnl.lostRevenueToCapacity)} />
+              </div>
+            )}
+
+            {scenario && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+                <div className="flex items-center gap-1.5 text-sm font-medium mb-2"><TrendingUp className="w-4 h-4 text-primary" /> Projected change</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                  <Delta label="Net income" base={scenario.baseline.net} proj={scenario.projected.net} fmt={money} />
+                  <Delta label="Revenue" base={scenario.baseline.revenue} proj={scenario.projected.revenue} fmt={money} />
+                  <Delta label="wRVU" base={scenario.baseline.wRvu} proj={scenario.projected.wRvu} fmt={(n) => Math.round(n).toLocaleString()} />
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </>
   );
 };
+
+function Delta({ label, base, proj, fmt }) {
+  const d = proj - base;
+  const up = d >= 0;
+  return (
+    <div>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="font-semibold">{fmt(proj)}</div>
+      <div className={`text-xs ${up ? 'text-green-600' : 'text-destructive'}`}>{up ? '+' : ''}{fmt(d)}</div>
+    </div>
+  );
+}
 
 const STATUS_STYLES = {
   ok: 'border-green-500/40 bg-green-500/5',

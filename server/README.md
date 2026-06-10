@@ -49,6 +49,17 @@ encrypted store.
 | POST | `/api/bi/snapshot` | executive BI snapshot (inline body or `{source:"warehouse"}`) |
 | POST | `/api/bi/scorecard` | CEO KPI scorecard with targets, variance, and exception alerts |
 | POST | `/api/bi/report` | full CEO report (snapshot + denials, A/R, referrals, turnaround, productivity, funnel) |
+| GET/PUT | `/api/practice/config` | read / persist the per-practice config (CT/Medicare defaults, customizable) |
+| POST | `/api/practice/estimate` | real-time expected $ + wRVU for one study (code, payer, component) |
+| POST | `/api/practice/model` | build the practice hypergraph + compute the P&L |
+| POST | `/api/practice/scenario` | predict income under change (levers) vs baseline |
+
+The practice is modeled as a **hypergraph** (`domain/hypergraph.js`) — exams,
+payers, referrers, sites, scanners, radiologists joined by `volume`/`capacity`/
+`staffing` hyperedges — priced by a config-driven **reimbursement engine**
+(`domain/reimbursement.js`, RVU×GPCI×CF, PC/TC, MPPR, payer rate rules). The
+**scenario engine** (`domain/practice.js`) projects income under contract,
+volume, payer-mix, and capacity changes. See `../docs/REIMBURSEMENT.md`.
 
 BI works two ways from the same metric engine (`domain/bi.js`): **CSV/JSON
 extracts** (no integrations needed — upload RCM/RIS/payer-remit exports) and a
