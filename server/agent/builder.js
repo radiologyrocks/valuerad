@@ -28,7 +28,9 @@ Process:
 1. Call list_metrics to see the metric library and dataset schemas.
 2. If unsure about field shapes, call sample_synthetic_data (these rows are synthetic; you never see real data).
 3. Draft a definition and call validate_definition. Fix any errors it reports and validate again.
-4. When validation passes, call propose_feature exactly once with the final definition.
+4. When validation passes, call propose_feature exactly once with the final definition and an outcome
+   rubric: 2-5 short, checkable statements of what "done" looks like for this request (e.g. "shows denied
+   dollars per payer", "only includes MR studies"). The approver grades the feature against them.
 
 Rules:
 - Prefer the simplest definition that answers the request. Reports for analysis; exports when they ask for CSV/files.
@@ -101,13 +103,17 @@ export const BUILDER_TOOLS = {
 
   propose_feature: {
     kind: 'write',
-    description: 'Register the final definition as a PROPOSED feature awaiting human approval. Only call once, after validate_definition reports ok.',
+    description: 'Register the final definition as a PROPOSED feature awaiting human approval. Only call once, after validate_definition reports ok. Include an outcome rubric: 2-5 short, checkable statements of what "done" looks like, derived from the request — the human approver grades against them.',
     input_schema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'short human-readable feature name' },
         featureKey: { type: 'string', description: 'stable kebab-case identity; new version if it already exists' },
         definition: { type: 'object' },
+        outcome: {
+          type: 'object',
+          properties: { rubric: { type: 'array', items: { type: 'string' }, description: 'checkable "done" criteria' } },
+        },
       },
       required: ['name', 'definition'],
     },
@@ -116,6 +122,7 @@ export const BUILDER_TOOLS = {
         name: input.name,
         featureKey: input.featureKey,
         definition: input.definition,
+        outcome: input.outcome,
         spec: services.spec,
         createdBy: services.createdBy ?? 'builder-agent',
         registry: services.registry,
@@ -141,7 +148,7 @@ function slugify(s) {
  * propose_feature tool AND the manual POST /api/features route, so generated
  * and hand-written features go through identical guardrails and evidence.
  */
-export async function proposeFeature({ name, featureKey, definition, spec, createdBy, registry }) {
+export async function proposeFeature({ name, featureKey, definition, spec, outcome, createdBy, registry }) {
   definition = coerceDefinition(definition);
   const decision = evaluateFeature(definition);
   if (!decision.allow) {
@@ -151,6 +158,12 @@ export async function proposeFeature({ name, featureKey, definition, spec, creat
   if (!evidence.ok) {
     return { proposed: false, blocked: true, reason: 'golden_tests_failed', evidence };
   }
+  // Outcome = the rubric the approver grades against ("what does done look
+  // like"). Normalized to { rubric: [string] }; invalid shapes are dropped,
+  // not fatal — a missing rubric just means the approver grades unaided.
+  const rubric = Array.isArray(outcome?.rubric)
+    ? outcome.rubric.filter((r) => typeof r === 'string' && r.trim()).slice(0, 20)
+    : null;
   const key = featureKey ? slugify(featureKey) : slugify(name);
   const version = (await registry.maxVersion(key)) + 1;
   const feature = await registry.create({
@@ -160,6 +173,7 @@ export async function proposeFeature({ name, featureKey, definition, spec, creat
     kind: definition.kind,
     tier: classifyTier(definition),
     spec: spec ?? null,
+    outcome: rubric?.length ? { rubric } : null,
     definition,
     status: 'proposed',
     content_hash: contentHash(definition),

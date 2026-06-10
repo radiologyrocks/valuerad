@@ -126,4 +126,24 @@ CREATE TABLE IF NOT EXISTS living_features (
   UNIQUE (feature_key, version)
 );
 CREATE INDEX IF NOT EXISTS living_features_status_idx ON living_features (status, kind);
+-- Additive columns (idempotent for existing deployments):
+-- outcome: the rubric ("what does done look like") captured with the request;
+-- attestation: signed provenance record attached at activation.
+ALTER TABLE living_features ADD COLUMN IF NOT EXISTS outcome JSONB;
+ALTER TABLE living_features ADD COLUMN IF NOT EXISTS attestation JSONB;
+
+-- First-class service principals — agents and integrations as their own
+-- identities (not shared role strings). Tokens are stored hashed; the
+-- plaintext is returned exactly once at creation. In production, dev header
+-- auth is disabled and bearer-token principals are the only machine identity.
+CREATE TABLE IF NOT EXISTS service_principals (
+  id           BIGSERIAL PRIMARY KEY,
+  name         TEXT UNIQUE NOT NULL,
+  token_hash   TEXT UNIQUE NOT NULL,
+  roles        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  created_by   TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ
+);
 

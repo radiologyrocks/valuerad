@@ -92,6 +92,12 @@ injected client; `POST /api/agent/run` returns 503 until the key is set.
 | Payer rule packs feeding the auth guardrail | `domain/priorauth.js`, `agent/policy.js`, `routes/agent.js` | `test/features.test.js` |
 | Ingest mappers applied at `/api/bi/ingest` | `routes/bi.js` + `domain/dsl.js` (`applyMapper`) | `test/dsl.test.js` |
 | Request box, approval queue, gallery, run/rollback UI | `src/pages/CommandCenter.jsx` | — |
+| MCP surface (16 tools, thin client over the audited API) | `mcp.js` | `test/mcp.test.js` |
+| Outcome rubrics captured + graded at activation | `agent/builder.js`, `routes/features.js` | `test/features.test.js` |
+| Service principals (machine identities, hashed tokens) | `lib/principals.js`, `lib/rbac.js`, `routes/principals.js` | `test/principals.test.js` |
+| Signed attestations at activation (Ed25519) | `lib/attest.js` | `test/attest.test.js` |
+| Eval suite: metric coverage + catalog regression + seams | `domain/evals.js`, `npm run eval` | `test/evals.test.js` |
+| Subscription dev transports for both agents | `agent/runnerDev.js`, `agent/builderDev.js` | `test/runnerDev.test.js`, `test/builderDev.test.js` |
 
 **Needs live wiring:** `ANTHROPIC_API_KEY` for the builder (no BAA needed on
 this path — the builder only ever sees schema docs and synthetic fixtures),

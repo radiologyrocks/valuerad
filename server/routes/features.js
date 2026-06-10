@@ -29,6 +29,8 @@ import { executeDefinition, applyMapper, ENGINE_VERSION } from '../domain/dsl.js
 import {
   FEATURE_STATES, transitionFeature, canActivate, runGoldenTests, rulePackCanary,
 } from '../domain/feature.js';
+import { attestFeature, verifyAttestation, attestationMode } from '../lib/attest.js';
+import { runEvalSuite } from '../domain/evals.js';
 import { CATALOG, catalogEntry } from '../domain/catalog.js';
 import { proposeFeature, runBuilder } from '../agent/builder.js';
 import { runBuilderDev } from '../agent/builderDev.js';
@@ -47,7 +49,9 @@ function publicFeature(f) {
     kind: f.kind,
     tier: f.tier,
     spec: f.spec,
+    outcome: f.outcome,
     definition: f.definition,
+    attestation: f.attestation,
     status: f.status,
     contentHash: f.content_hash,
     engineVersion: f.engine_version,
@@ -99,12 +103,12 @@ router.get('/features/catalog', staff, (_req, res) => {
 // ---------------------------------------------------------------------------
 
 router.post('/features', approver, async (req, res) => {
-  const { name, featureKey, spec, definition } = req.body ?? {};
+  const { name, featureKey, spec, outcome, definition } = req.body ?? {};
   if (!name || typeof name !== 'string') return res.status(400).json({ error: 'name (string) is required' });
   if (definition == null || typeof definition !== 'object') return res.status(400).json({ error: 'definition (object) is required' });
 
   try {
-    const result = await proposeFeature({ name, featureKey, definition, spec, createdBy: req.user.id, registry: featureRegistry });
+    const result = await proposeFeature({ name, featureKey, definition, spec, outcome, createdBy: req.user.id, registry: featureRegistry });
     if (!result.proposed) {
       await audit(req, 'feature.blocked', null, { name, reason: result.reason, errors: result.errors }, 'error');
       return res.status(422).json({ error: result.reason, errors: result.errors ?? [], evidence: result.evidence });
@@ -198,6 +202,28 @@ router.post('/features/:id/approve', approver, async (req, res) => {
     const gate = canActivate(feature);
     if (!gate.ok) return res.status(422).json({ error: gate.reason });
 
+    // If the request captured an outcome rubric, activation requires the
+    // approver to grade it — that review is part of the attestation trail.
+    let outcomeReview = null;
+    const rubric = feature.outcome?.rubric;
+    if (Array.isArray(rubric) && rubric.length > 0) {
+      const results = req.body?.rubricResults;
+      if (!Array.isArray(results) || results.length !== rubric.length) {
+        return res.status(422).json({
+          error: 'rubric_review_required',
+          detail: `pass rubricResults: [boolean] (length ${rubric.length}) grading each criterion`,
+          rubric,
+        });
+      }
+      outcomeReview = {
+        rubric,
+        results: results.map(Boolean),
+        satisfiedCount: results.filter(Boolean).length,
+        reviewedBy: req.user.id,
+        reviewedAt: new Date().toISOString(),
+      };
+    }
+
     // One active version per feature_key: retire the sibling being replaced.
     const siblings = await featureRegistry.list({ featureKey: feature.feature_key, status: FEATURE_STATES.ACTIVE });
     for (const s of siblings.filter((s) => s.id !== feature.id)) {
@@ -206,7 +232,33 @@ router.post('/features/:id/approve', approver, async (req, res) => {
       await audit(req, 'feature.retired', s, { replacedBy: `v${feature.version}` });
     }
 
-    return applyTransition(req, res, feature, FEATURE_STATES.ACTIVE, { gate: gate.reason }, { approved_by: req.user.id });
+    // Sign the activation: the attestation binds content hash, engine,
+    // evidence, and approver into a verifiable provenance record.
+    const attestation = attestFeature({ ...feature, approved_by: req.user.id });
+    return applyTransition(
+      req, res, feature, FEATURE_STATES.ACTIVE,
+      { gate: gate.reason, ...(outcomeReview ? { outcomeSatisfied: `${outcomeReview.satisfiedCount}/${rubric.length}` } : {}) },
+      {
+        approved_by: req.user.id,
+        attestation,
+        ...(outcomeReview ? { test_evidence: { ...feature.test_evidence, outcomeReview } } : {}),
+      }
+    );
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/features/:id/attestation', staff, async (req, res) => {
+  try {
+    const feature = await load(req, res);
+    if (!feature) return;
+    if (!feature.attestation) return res.status(404).json({ error: 'feature has no attestation (never activated)' });
+    return res.json({
+      attestation: feature.attestation,
+      verified: verifyAttestation(feature.attestation),
+      signingMode: attestationMode,
+    });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -290,7 +342,11 @@ router.post('/features/:id/rollback', approver, async (req, res) => {
     await audit(req, 'feature.retired', feature, { rolledBackTo: `v${prior.version}` });
 
     const activate = transitionFeature(prior, FEATURE_STATES.ACTIVE, { by: req.user.id, rollbackOf: `v${feature.version}` });
-    const restored = await featureRegistry.update(prior.id, { ...activate, approved_by: req.user.id });
+    const restored = await featureRegistry.update(prior.id, {
+      ...activate,
+      approved_by: req.user.id,
+      attestation: attestFeature({ ...prior, approved_by: req.user.id }),
+    });
     await audit(req, 'feature.active', restored, { rollbackOf: `v${feature.version}` });
     return res.json({ feature: publicFeature(restored), rolledBack: `v${feature.version}` });
   } catch (err) {
@@ -344,6 +400,21 @@ router.post('/features/:id/run', staff, async (req, res) => {
 // Upgrade gate — re-run golden tests on every active feature against the
 // current engine. Failures are flagged (and audited), never silently retired.
 // ---------------------------------------------------------------------------
+
+// The deterministic eval suite (metric coverage, catalog output regression,
+// seam coverage) — the deeper layer under golden tests. See domain/evals.js.
+router.get('/evals', approver, async (req, res) => {
+  try {
+    const result = runEvalSuite();
+    await audit(req, result.ok ? 'evals.passed' : 'evals.failed', null, {
+      passed: result.checks.filter((c) => c.ok).length,
+      total: result.checks.length,
+    }, result.ok ? 'success' : 'error');
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 router.post('/features/revalidate', approver, async (req, res) => {
   try {

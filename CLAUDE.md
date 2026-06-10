@@ -27,9 +27,13 @@ Dev identity: requests need `X-ValueRad-User` / `X-ValueRad-Roles` headers
 - `server/agent/` — the agents. `runner.js`/`builder.js` (Messages API),
   `runnerDev.js`/`builderDev.js` (dev-only Claude-subscription transport via Agent SDK).
   `tools.js` action plane · `policy.js` guardrail plane.
-- `server/lib/` — store, db, warehouse, features registry, rbac, crypto, jobs, fhir.
+- `server/lib/` — store, db, warehouse, features registry, rbac, principals
+  (machine identities), attest (signed provenance), crypto, jobs, fhir.
   Every store has a Postgres backend (when `DATABASE_URL` set) and a memory dev backend.
 - `server/routes/` — Express routers; RBAC-gated; every mutation audited.
+- `server/mcp.js` — the MCP tool surface: a thin client over the HTTP API
+  (adds no authority). `npm run eval` runs the deterministic eval suite;
+  re-pin catalog baselines with `npm run eval:update` only for deliberate changes.
 - `docs/` — strategy + architecture. Read `LIVING_SOFTWARE.md` before touching
   the feature layer; `FUTURE_PROOFING.md` for direction; `STAGE_0_ARCHITECTURE.md` for substrate.
 

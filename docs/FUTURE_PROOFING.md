@@ -102,7 +102,7 @@ is heading toward, already load-bearing here.
    `.github/workflows/ci.yml` — so the verification gate of claim 1 is in
    place; the moves below deepen what it verifies.)
 
-### Next builds (in priority order)
+### Next builds (in priority order) — **all shipped same day; see `IMPLEMENTATION_STATUS.md`**
 2. **An MCP surface for the command center.** Expose the governed API —
    feature lifecycle, BI reports, agent runs — as an MCP server
    (`server/mcp.js`), with the same RBAC and audit as HTTP routes. This is

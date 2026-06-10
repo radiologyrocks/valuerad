@@ -41,6 +41,10 @@ const TOOL_SHAPES = {
     name: z.string().describe('short human-readable feature name'),
     featureKey: z.string().optional().describe('stable kebab-case identity'),
     definition: definitionShape,
+    outcome: z
+      .object({ rubric: z.array(z.string()).describe('checkable "done" criteria') })
+      .optional()
+      .describe('2-5 short statements of what done looks like; the approver grades against them'),
   },
 };
 

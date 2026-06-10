@@ -13,21 +13,21 @@
 
 import { pool, databaseEnabled } from './db.js';
 
-const COLUMNS = `id, feature_key, version, name, kind, tier, spec, definition, status,
-  content_hash, engine_version, created_by, approved_by, test_evidence, history,
+const COLUMNS = `id, feature_key, version, name, kind, tier, spec, outcome, definition, status,
+  content_hash, engine_version, created_by, approved_by, test_evidence, attestation, history,
   created_at, updated_at`;
 
 class PostgresFeatureRegistry {
   async create(f) {
     const { rows } = await pool.query(
       `INSERT INTO living_features
-         (feature_key, version, name, kind, tier, spec, definition, status,
+         (feature_key, version, name, kind, tier, spec, outcome, definition, status,
           content_hash, engine_version, created_by, test_evidence, history)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING ${COLUMNS}`,
       [
         f.feature_key, f.version, f.name, f.kind, f.tier, f.spec ?? null,
-        f.definition, f.status, f.content_hash, f.engine_version,
+        f.outcome ?? null, f.definition, f.status, f.content_hash, f.engine_version,
         f.created_by ?? null, f.test_evidence ?? null, JSON.stringify(f.history ?? []),
       ]
     );
@@ -86,7 +86,8 @@ class MemoryFeatureRegistry {
   async create(f) {
     const row = {
       id: ++this._seq,
-      spec: null, created_by: null, approved_by: null, test_evidence: null, history: [],
+      spec: null, outcome: null, created_by: null, approved_by: null,
+      test_evidence: null, attestation: null, history: [],
       ...f,
       created_at: new Date(),
       updated_at: new Date(),

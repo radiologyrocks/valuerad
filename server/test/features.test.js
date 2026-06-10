@@ -176,6 +176,21 @@ test('proposeFeature registers a versioned, evidenced, proposed row', async () =
   assert.equal(r2.feature.feature_key, r1.feature.feature_key);
 });
 
+test('proposeFeature captures and normalizes the outcome rubric', async () => {
+  const withRubric = await proposeFeature({
+    name: 'Rubric demo', definition: REPORT_DEF, spec: 'show referrers',
+    outcome: { rubric: ['shows top referrers', '  ', 'compares to prior period', 42] },
+    createdBy: 'tester', registry: featureRegistry,
+  });
+  assert.deepEqual(withRubric.feature.outcome, { rubric: ['shows top referrers', 'compares to prior period'] });
+
+  const without = await proposeFeature({
+    name: 'No rubric demo', definition: REPORT_DEF,
+    createdBy: 'tester', registry: featureRegistry,
+  });
+  assert.equal(without.feature.outcome, null);
+});
+
 test('proposeFeature blocks invalid and tier-3 definitions', async () => {
   const invalid = await proposeFeature({
     name: 'bad', definition: { kind: 'report', title: 'x', blocks: [{ id: 'a', metric: 'nope' }] },
