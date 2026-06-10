@@ -425,9 +425,31 @@ function LivingFeatures() {
     act(`Installed "${key}" as proposed — approve it to activate.`, () => apiPost(`/api/features/catalog/${key}/install`, {}));
   };
 
-  const lifecycle = (f, action, label) => {
+  const lifecycle = (f, action, label, body = {}) => {
     setBusy(f.id);
-    act(label, () => apiPost(`/api/features/${f.id}/${action}`, {}));
+    act(label, () => apiPost(`/api/features/${f.id}/${action}`, body));
+  };
+
+  // Activation of a feature with an outcome rubric requires grading each
+  // criterion — the review is recorded in the evidence and audit trail.
+  const [grading, setGrading] = useState(null); // { feature, results: [bool] }
+
+  const needsRubric = (f) =>
+    Array.isArray(f.outcome?.rubric) && f.outcome.rubric.length > 0 &&
+    (f.tier === 1 ? f.status === 'proposed' : f.status === 'canary');
+
+  const approve = (f) => {
+    if (needsRubric(f)) {
+      setGrading({ feature: f, results: f.outcome.rubric.map(() => true) });
+      return;
+    }
+    lifecycle(f, 'approve', f.tier === 2 && f.status === 'proposed' ? `${f.name} approved into canary.` : `${f.name} is now active.`);
+  };
+
+  const confirmGrading = () => {
+    const { feature, results } = grading;
+    setGrading(null);
+    lifecycle(feature, 'approve', `${feature.name} is now active (rubric: ${results.filter(Boolean).length}/${results.length} satisfied).`, { rubricResults: results });
   };
 
   const run = (f) => {
@@ -495,10 +517,15 @@ function LivingFeatures() {
                     golden {f.testEvidence.ok ? '✓' : '✗'}
                   </span>
                 )}
+                {f.attestation && (
+                  <span className="text-xs text-green-700" title={`signed ${f.attestation.signedAt} by ${f.attestation.approvedBy} (${f.attestation.mode})`}>
+                    signed ✓{f.attestation.mode === 'ephemeral-dev' ? ' (dev)' : ''}
+                  </span>
+                )}
                 <span className="flex-1" />
                 {f.status === 'proposed' && (
                   <>
-                    <Button size="sm" variant="secondary" disabled={busy === f.id} onClick={() => lifecycle(f, 'approve', f.tier === 2 ? `${f.name} approved into canary.` : `${f.name} is now active.`)}>
+                    <Button size="sm" variant="secondary" disabled={busy === f.id} onClick={() => approve(f)}>
                       <CheckCircle2 className="w-3.5 h-3.5 mr-1" />{f.tier === 2 ? 'Approve → canary' : 'Approve'}
                     </Button>
                     <Button size="sm" variant="ghost" disabled={busy === f.id} onClick={() => lifecycle(f, 'reject', `${f.name} rejected.`)}>Reject</Button>
@@ -509,7 +536,7 @@ function LivingFeatures() {
                     <Button size="sm" variant="secondary" disabled={busy === f.id} onClick={() => lifecycle(f, 'canary', `Canary report stored for ${f.name} — review it, then promote.`)}>
                       Shadow-evaluate
                     </Button>
-                    <Button size="sm" variant="secondary" disabled={busy === f.id} onClick={() => lifecycle(f, 'approve', `${f.name} promoted to active.`)}>
+                    <Button size="sm" variant="secondary" disabled={busy === f.id} onClick={() => approve(f)}>
                       <CheckCircle2 className="w-3.5 h-3.5 mr-1" />Promote
                     </Button>
                   </>
@@ -529,6 +556,41 @@ function LivingFeatures() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Rubric grading — activation records this review in the attestation trail */}
+        {grading && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
+            <div className="text-sm font-medium">
+              Grade the outcome rubric for “{grading.feature.name}” — does the feature actually do what was asked?
+            </div>
+            <div className="space-y-1.5">
+              {grading.feature.outcome.rubric.map((criterion, i) => (
+                <label key={i} className="flex items-start gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={grading.results[i]}
+                    onChange={(e) => setGrading({
+                      ...grading,
+                      results: grading.results.map((r, j) => (j === i ? e.target.checked : r)),
+                    })}
+                    className="mt-0.5"
+                  />
+                  <span>{criterion}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={confirmGrading}>
+                <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                Activate ({grading.results.filter(Boolean).length}/{grading.results.length} satisfied)
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setGrading(null)}>Cancel</Button>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Your grading is recorded in the feature’s evidence and audit trail alongside the signed attestation.
+            </div>
           </div>
         )}
 
