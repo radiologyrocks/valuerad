@@ -91,20 +91,28 @@ writes, crypto, RBAC, audit) is never generated. The builder's tools have no
 code path to real data — generation runs outside the BAA boundary. See
 `../docs/LIVING_SOFTWARE.md`.
 
-### Builder auth: API key, or a Claude subscription for development
+### Agent auth: API key, or a Claude subscription for development
 
-Two transports, same tools/guardrails/audit:
+Both agents (operations runner and feature builder) support two transports,
+with identical tools, guardrails, and audit:
 
 - **`ANTHROPIC_API_KEY` set** → Messages API (pay-per-token). Required in
   production.
-- **No key, dev only** → the builder falls back to the **Claude Agent SDK**
-  (`agent/builderDev.js`), which uses Claude Code's login. Run
-  `claude /login` once with a Claude Pro/Max subscription and leave
-  `ANTHROPIC_API_KEY` unset (a set key overrides subscription auth). Agent
-  SDK usage draws from the plan's monthly credit pool instead of per-token
-  billing. Per Anthropic's terms this is for personal development only —
-  `NODE_ENV=production` refuses the fallback. `BUILDER_DEV_MODEL` optionally
-  overrides the model.
+- **No key, dev only** → fall back to the **Claude Agent SDK**
+  (`agent/runnerDev.js`, `agent/builderDev.js`), which uses Claude Code's
+  login. Run `claude /login` once with a Claude Pro/Max subscription and
+  leave `ANTHROPIC_API_KEY` unset (a set key overrides subscription auth).
+  Agent SDK usage draws from the plan's monthly credit pool instead of
+  per-token billing. Per Anthropic's terms this is for personal development
+  only — `NODE_ENV=production` refuses the fallback.
+
+On the subscription transport the guardrail plane is enforced *inside* every
+tool handler (same `executeToolCall` as the production loop), so recommend
+mode still never mutates and policy blocks still apply. Two extra gates:
+the operations agent **refuses live EHR sessions** on this transport (no BAA
+on a personal subscription — demo/synthetic data only), and the builder
+never sees real data by construction. `AGENT_DEV_MODEL` / `BUILDER_DEV_MODEL`
+optionally override the model.
 
 ## Production checklist (not in code)
 

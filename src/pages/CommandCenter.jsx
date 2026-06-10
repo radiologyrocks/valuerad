@@ -124,7 +124,7 @@ const CommandCenter = () => {
       setAgentResult(result);
     } catch (err) {
       setAgentError(err.status === 503
-        ? 'The agent needs an ANTHROPIC_API_KEY on the backend (and a signed BAA before any PHI). Set it and try again.'
+        ? `${err.message} (A signed BAA is required before any PHI; the subscription dev transport refuses live EHR sessions for that reason.)`
         : err.message);
     } finally {
       setAgentLoading(false);
