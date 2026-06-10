@@ -148,3 +148,32 @@ export async function exchangeCodeForTokens({
 
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// Refresh an access token using a refresh_token (SMART "online"/"offline" access)
+// ---------------------------------------------------------------------------
+
+export async function refreshTokens({ tokenEndpoint, clientId, clientSecret, refreshToken, scopes }) {
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: clientId,
+  });
+
+  if (scopes) body.set('scope', Array.isArray(scopes) ? scopes.join(' ') : scopes);
+
+  const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+  if (clientSecret) {
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    headers['Authorization'] = `Basic ${credentials}`;
+  }
+
+  const res = await fetch(tokenEndpoint, { method: 'POST', headers, body });
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(`Token refresh failed (${res.status}): ${JSON.stringify(data)}`);
+  }
+
+  return data;
+}
