@@ -1,15 +1,18 @@
 {
   "name": "valuerad-server",
   "version": "1.0.0",
-  "description": "ValueRad FHIR SMART App Launch backend",
+  "description": "ValueRad command center backend — SMART on FHIR, encrypted token store, audit log",
   "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "test": "node --test"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
     "express": "^4.19.2",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "pg": "^8.13.1"
   }
 }

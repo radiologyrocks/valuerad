@@ -1,0 +1,87 @@
+# Implementation Status — blueprint → code
+
+Maps every stage of the command-center blueprint to the modules and tests that
+now implement it. "In code" means the logic exists and is unit-tested; "Needs
+live wiring" means the seam exists but requires external credentials/infra
+(production Epic, payer connections, a HIPAA host, an Anthropic key) that can't
+live in the repo.
+
+## Stage 0 — Foundation ✅ in code
+| Capability | Module | Tests |
+|---|---|---|
+| Durable encrypted store (Postgres + dev memory) | `lib/store.js`, `db/schema.sql`, `lib/db.js` | `test/store.test.js` |
+| Token encryption at rest (AES-256-GCM) | `lib/crypto.js` | `test/crypto.test.js` |
+| Append-only audit log | `lib/store.js` (`audit`) | `test/store.test.js` |
+| FHIR write capability + scheduling seam | `lib/fhir.js` | — |
+| Automatic SMART token refresh | `lib/smart.js`, `routes/smart.js` | — |
+| RBAC for ValueRad users + agent identity | `lib/rbac.js` | exercised in routes |
+| Async job backbone | `lib/jobs.js` | `test/jobs.test.js` |
+| Lead capture | `routes/leads.js` | — |
+| Production guard (no PHI without DB + encryption) | `index.js` | — |
+
+**Needs live wiring:** a HIPAA-eligible host + BAA, real `DATABASE_URL` /
+`TOKEN_ENC_KEY` / `EPIC_*`, a real IdP behind `lib/rbac.js`.
+
+## Stage 1 — Scheduling (magnet utilization) ✅ in code
+| Capability | Module | Tests |
+|---|---|---|
+| Explainable no-show risk | `domain/scheduling.js` (`noShowRisk`) | `test/domain.test.js` |
+| Utilization-first slot ranking | `domain/scheduling.js` (`rankSlots`) | `test/domain.test.js` |
+| Waitlist backfill | `domain/scheduling.js` (`bestBackfill`) | `test/domain.test.js` |
+| Booking via scheduling seam | `agent/tools.js` (`book_appointment`) | `test/agent.test.js` |
+
+**Needs live wiring:** Epic scheduling API behind `SchedulingClient`
+(`lib/fhir.js`) — Epic scheduling is often not plain FHIR `Appointment.create`.
+
+## Stage 1.5 — Eligibility ✅ in code
+| Capability | Module | Tests |
+|---|---|---|
+| Benefits evaluation before high-cost booking | `domain/eligibility.js` | `test/domain.test.js` |
+
+**Needs live wiring:** FHIR `Coverage` reads (the read path exists in `lib/fhir.js`).
+
+## Stage 2 — Prior authorization ✅ in code
+| Capability | Module | Tests |
+|---|---|---|
+| Auth-required rules | `domain/priorauth.js` (`authRequired`) | `test/domain.test.js` |
+| Lifecycle state machine | `domain/priorauth.js` (`transition`) | `test/domain.test.js` |
+| "Nothing high-cost scans without a valid auth" | `domain/priorauth.js` (`safeToPerform`) + `agent/policy.js` | `test/domain.test.js`, `test/agent.test.js` |
+| Async submission/polling | `agent/tools.js` (`submit_prior_auth`) + `lib/jobs.js` | `test/jobs.test.js` |
+
+**Needs live wiring:** payer connections (clearinghouse / payer portals), and
+per-contract auth rules to extend `PAYER_EXCEPTIONS`.
+
+## Stage 3 — Automate everything tractable ✅ in code
+| Capability | Module | Tests |
+|---|---|---|
+| Radiologist worklist routing / load-balancing | `domain/worklist.js` | `test/bi.test.js` |
+| Reminders, backfill, escalation as agent tools | `agent/tools.js` | `test/agent.test.js` |
+
+## Stage 4 — Business intelligence ✅ in code
+| Capability | Module | Tests |
+|---|---|---|
+| Utilization, no-show, auth, modality mix, payer leakage, exec snapshot | `domain/bi.js` | `test/bi.test.js` |
+| Executive endpoint (RBAC-gated) | `routes/bi.js` | smoke-tested |
+
+**Needs live wiring:** a data warehouse feeding `domain/bi.js` from the
+operational record accumulated in Stages 1–3.
+
+## The agent (five planes) ✅ in code
+| Plane | Module | Tests |
+|---|---|---|
+| Data (senses) | FHIR reads + domain data injected as `services` | — |
+| Action (typed, audited tools) | `agent/tools.js` | `test/agent.test.js` |
+| Guardrails (conscience) | `agent/policy.js` | `test/agent.test.js` |
+| Memory (record) | `lib/store.js` audit + jobs | `test/store.test.js` |
+| Orchestration (nervous system) | `agent/runner.js` — manual loop on `claude-opus-4-8`, adaptive thinking, recommend mode default | `test/agent.test.js` (injected client) |
+
+**Needs live wiring:** `ANTHROPIC_API_KEY` + a signed BAA with the LLM provider
+before any PHI reaches the model. The runner is built and tested with an
+injected client; `POST /api/agent/run` returns 503 until the key is set.
+
+## Honest boundary
+Every piece of business logic and the full agent architecture are implemented
+and tested in-repo. What remains is **integration and infrastructure**, not
+design: connect production Epic, payer channels, a data warehouse, a HIPAA host,
+an IdP, and an Anthropic key with a BAA. Those are deployment/contractual steps —
+the software is ready for them via the seams above.
