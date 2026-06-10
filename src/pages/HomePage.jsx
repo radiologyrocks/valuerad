@@ -22,7 +22,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import BenefitCard from '@/components/BenefitCard.jsx';
 import FeatureCard from '@/components/FeatureCard.jsx';
-import TestimonialCard from '@/components/TestimonialCard.jsx';
 import StatsMetric from '@/components/StatsMetric.jsx';
 
 const HomePage = () => {
@@ -39,43 +38,43 @@ const HomePage = () => {
       icon: Calendar,
       title: 'Reduced scheduling errors and patient no-shows',
       description: 'Intelligent automation minimizes human error and sends automated reminders to patients, significantly reducing missed appointments.',
-      metric: '42% reduction in no-shows'
+      metric: 'Target: fewer no-shows'
     },
     {
       icon: Clock,
       title: 'Faster exam scheduling and turnaround times',
       description: 'Streamlined workflows and real-time availability checking enable rapid appointment booking and confirmation.',
-      metric: '53% faster scheduling'
+      metric: 'Target: faster scheduling'
     },
     {
       icon: Users,
       title: 'Reduced staff workload and labor costs',
       description: 'Automation handles routine scheduling tasks, freeing staff to focus on patient care and complex cases.',
-      metric: '38% reduction in admin time'
+      metric: 'Target: less admin time'
     },
     {
       icon: TrendingUp,
       title: 'Improved patient satisfaction and experience',
       description: 'Convenient self-service scheduling, automated reminders, and reduced wait times create a better patient journey.',
-      metric: '4.7/5 patient satisfaction'
+      metric: 'Target: higher satisfaction'
     },
     {
       icon: Zap,
       title: 'Maximized radiology department efficiency',
       description: 'Optimized resource allocation and intelligent scheduling ensure equipment and staff are utilized effectively.',
-      metric: '31% efficiency gain'
+      metric: 'Target: higher scanner utilization'
     },
     {
       icon: BarChart3,
       title: 'Reduced operational bottlenecks',
       description: 'Real-time visibility into scheduling patterns helps identify and eliminate workflow constraints.',
-      metric: '47% fewer delays'
+      metric: 'Target: fewer delays'
     },
     {
       icon: CheckCircle2,
       title: 'Improved patient access to scheduling',
       description: '24/7 online scheduling and mobile access make it easier for patients to book appointments at their convenience.',
-      metric: '68% online booking rate'
+      metric: 'Target: more online booking'
     }
   ];
 
@@ -118,28 +117,26 @@ const HomePage = () => {
     }
   ];
 
-  const testimonials = [
+  // Foundations the platform is genuinely built on — no fabricated endorsements.
+  const foundations = [
     {
-      quote: 'ValueRad transformed our radiology department. We reduced no-shows by 43% in the first quarter and our staff can finally focus on patient care instead of phone scheduling.',
-      author: 'Dr. Sarah Chen',
-      role: 'Director of Radiology',
-      organization: 'Meridian Medical Center'
+      title: 'EMR-native by design',
+      description: 'Built on SMART on FHIR with an Epic App Launch flow, so ValueRad reads and acts inside your existing EHR rather than beside it.'
     },
     {
-      quote: 'The ROI was immediate. Within 60 days, we saw a 51% reduction in scheduling time and our patient satisfaction scores jumped from 3.8 to 4.6 out of 5.',
-      author: 'Marcus Thompson',
-      role: 'Operations Manager',
-      organization: 'Coastal Healthcare Network'
+      title: 'Open healthcare standards',
+      description: 'OAuth 2.0 with PKCE, FHIR R4 resources, and standards-based discovery — no proprietary lock-in to integrate.'
     },
     {
-      quote: 'Integration with our existing EHR was seamless. The automated reminders alone saved us countless hours of staff time and dramatically reduced missed appointments.',
-      author: 'Dr. Priya Patel',
-      role: 'Chief Medical Officer',
-      organization: 'Summit Regional Hospital'
+      title: 'Built for trust',
+      description: 'Audit-logged, least-privilege access and a human-in-the-loop model: every automated action is attributable and reversible.'
     }
   ];
 
-  const handleSubmit = (e) => {
+  const [submitting, setSubmitting] = useState(false);
+  const LEADS_ENDPOINT = import.meta.env.VITE_LEADS_ENDPOINT || '';
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!formData.name || !formData.email || !formData.organization) {
@@ -150,17 +147,38 @@ const HomePage = () => {
       return;
     }
 
-    toast({
-      title: 'Demo request received',
-      description: 'Our team will contact you within 24 hours.'
-    });
+    // No backend configured yet (Stage 0): be honest instead of faking success.
+    if (!LEADS_ENDPOINT) {
+      toast({
+        title: 'Thanks — please email us to book your demo',
+        description: 'Lead capture goes live with our Stage 0 backend. For now, reach us at hello@valuerad.com and we will follow up.'
+      });
+      return;
+    }
 
-    setFormData({
-      name: '',
-      email: '',
-      organization: '',
-      message: ''
-    });
+    setSubmitting(true);
+    try {
+      const res = await fetch(LEADS_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+
+      toast({
+        title: 'Demo request received',
+        description: 'Our team will contact you within 24 hours.'
+      });
+      setFormData({ name: '', email: '', organization: '', message: '' });
+    } catch (err) {
+      toast({
+        title: "Couldn't submit your request",
+        description: 'Please try again, or email us at hello@valuerad.com.',
+        variant: 'destructive'
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleInputChange = (e) => {
@@ -203,7 +221,7 @@ const HomePage = () => {
                 Automate radiology scheduling.<br />Maximize your ROI.
               </h1>
               <p className="text-xl md:text-2xl text-white/90 mb-8 max-w-3xl mx-auto leading-relaxed">
-                Reduce no-shows by 42%, cut scheduling time in half, and improve patient satisfaction with intelligent workflow automation.
+                An EMR-native automation platform built to cut no-shows, shorten scheduling time, and lift patient satisfaction — starting with scheduling and growing into insurance approvals and beyond.
               </p>
               <Button
                 size="lg"
@@ -219,12 +237,15 @@ const HomePage = () => {
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.3 }}
-              className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-8"
+              className="mt-16"
             >
-              <StatsMetric number="42" suffix="%" label="Fewer no-shows" />
-              <StatsMetric number="53" suffix="%" label="Faster scheduling" />
-              <StatsMetric number="4.7" suffix="/5" label="Patient satisfaction" />
-              <StatsMetric number="31" suffix="%" label="Efficiency gain" />
+              <p className="text-sm uppercase tracking-wide text-white/70 mb-6">Design targets the platform is built to hit</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+                <StatsMetric number="40" suffix="%+" label="Fewer no-shows (target)" />
+                <StatsMetric number="50" suffix="%+" label="Faster scheduling (target)" />
+                <StatsMetric number="24" suffix="/7" label="Self-service access" />
+                <StatsMetric number="100" suffix="%" label="EMR-native by design" />
+              </div>
             </motion.div>
           </div>
         </section>
@@ -239,10 +260,10 @@ const HomePage = () => {
               className="text-center mb-16"
             >
               <h2 className="text-3xl md:text-4xl font-bold mb-4" style={{ letterSpacing: '-0.02em' }}>
-                Measurable impact on your bottom line
+                Designed for measurable impact on your bottom line
               </h2>
               <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                ValueRad delivers quantifiable ROI through automation, optimization, and improved patient experience.
+                ValueRad is built to drive ROI through automation, optimization, and a better patient experience. The figures below are design targets, not guarantees — we publish real results as customers go live.
               </p>
             </motion.div>
 
@@ -366,24 +387,25 @@ const HomePage = () => {
               className="text-center mb-16"
             >
               <h2 className="text-3xl md:text-4xl font-bold mb-4" style={{ letterSpacing: '-0.02em' }}>
-                Trusted by healthcare leaders
+                Built on open healthcare standards
               </h2>
               <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                See how radiology departments are achieving measurable ROI with ValueRad.
+                ValueRad connects to your EHR through the same standards the industry trusts — so integration is real, not a promise.
               </p>
             </motion.div>
 
-            <div className="columns-1 md:columns-2 lg:columns-3 gap-6 space-y-6">
-              {testimonials.map((testimonial, index) => (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {foundations.map((item, index) => (
                 <motion.div
                   key={index}
                   initial={{ opacity: 0, y: 20 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                   transition={{ duration: 0.5, delay: index * 0.1 }}
-                  className="break-inside-avoid"
+                  className="bg-card p-8 rounded-2xl shadow-sm"
                 >
-                  <TestimonialCard {...testimonial} />
+                  <h3 className="text-xl font-semibold mb-3">{item.title}</h3>
+                  <p className="text-muted-foreground leading-relaxed">{item.description}</p>
                 </motion.div>
               ))}
             </div>
@@ -482,9 +504,10 @@ const HomePage = () => {
               <Button
                 type="submit"
                 size="lg"
+                disabled={submitting}
                 className="w-full transition-all duration-200 active:scale-[0.98]"
               >
-                Request demo
+                {submitting ? 'Submitting…' : 'Request demo'}
                 <ArrowRight className="ml-2 w-5 h-5" />
               </Button>
             </motion.form>
