@@ -63,9 +63,14 @@ Dev identity: requests need `X-ValueRad-User` / `X-ValueRad-Roles` headers
 - ES modules, no TypeScript, no build step on the server. Dependency-light on
   purpose (express, pg, zod, SDKs) — don't add frameworks.
 - Domain modules stay pure (no env, no I/O); routes/lib do the wiring.
-- Tests: `node:test` + `assert/strict`, `delete process.env.DATABASE_URL` at
-  top so the memory backends are used. Agents are tested with injected fake
-  clients/SDKs — see `test/agent.test.js`, `test/builderDev.test.js`.
+- Tests: `node:test` + `assert/strict`. Unit tests use the memory backends —
+  **never run the unit suite with `DATABASE_URL` set**: the `delete
+  process.env.DATABASE_URL` line in test files runs *after* ESM imports
+  resolve, so a set var silently points unit tests at the real database.
+  Postgres coverage lives in `test/integration/` (skips without
+  `DATABASE_URL`; CI scopes the var to that step only). Agents are tested
+  with injected fake clients/SDKs — see `test/agent.test.js`,
+  `test/builderDev.test.js`.
 - File headers carry a short design rationale; match the existing voice.
 - New behavior ships as data behind the engine when possible, code only when
   necessary.
