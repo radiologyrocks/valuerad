@@ -43,6 +43,19 @@ encrypted store.
 | POST | `/epic/fhir/:resource` | audited create |
 | PUT  | `/epic/fhir/:resource/:id` | audited update |
 | POST | `/api/leads` | storefront lead capture |
+| POST | `/api/agent/run` | run the command-center agent (recommend mode default; 503 without `ANTHROPIC_API_KEY`) |
+| POST | `/api/bi/snapshot` | executive BI snapshot (executive/admin role) |
+
+## Stages implemented
+
+Beyond Stage 0, the domain logic and agent for Stages 1–4 are implemented and
+unit-tested (`domain/`, `agent/`). See `../docs/IMPLEMENTATION_STATUS.md` for the
+blueprint→code map and what still needs live wiring (production Epic, payer
+channels, a data warehouse, an Anthropic key + BAA).
+
+The agent uses `claude-opus-4-8` with adaptive thinking and a manual,
+guardrail-gated tool loop. It defaults to **recommend mode** (proposes, never
+mutates) and graduates to **autonomous** per capability once trusted.
 
 ## Production checklist (not in code)
 

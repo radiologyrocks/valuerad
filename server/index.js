@@ -1,6 +1,8 @@
 import express from 'express';
 import { smartRouter } from './routes/smart.js';
 import { leadsRouter } from './routes/leads.js';
+import { agentRouter } from './routes/agent.js';
+import { biRouter } from './routes/bi.js';
 import { migrate, databaseEnabled, closeDb } from './lib/db.js';
 import { storeBackend } from './lib/store.js';
 import { encryptionEnabled } from './lib/crypto.js';
@@ -29,6 +31,8 @@ app.get('/health', (_req, res) =>
 
 app.use('/epic', smartRouter);
 app.use('/api', leadsRouter);
+app.use('/api', agentRouter);
+app.use('/api', biRouter);
 
 async function start() {
   try {
