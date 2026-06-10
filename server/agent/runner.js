@@ -17,7 +17,7 @@ import { evaluate, shouldExecute } from './policy.js';
 const MODEL = process.env.AGENT_MODEL || 'claude-opus-4-8';
 const MAX_ITERATIONS = 12;
 
-const SYSTEM_PROMPT = `You are the operations agent for a radiology practice's command center.
+export const AGENT_SYSTEM_PROMPT = `You are the operations agent for a radiology practice's command center.
 Your job is to run scheduling, insurance approvals, and worklist routing efficiently while protecting revenue and patients.
 
 Operating rules:
@@ -39,8 +39,9 @@ function toToolResult(toolUseId, value, isError = false) {
 /**
  * Execute one tool call through the guardrail plane.
  * Returns { result, record } where record describes what happened (for audit).
+ * Exported so alternate transports (runnerDev.js) enforce the identical policy.
  */
-async function executeToolCall(block, { services, mode, ctx }) {
+export async function executeToolCall(block, { services, mode, ctx }) {
   const tool = TOOLS[block.name];
   if (!tool) {
     return { result: { error: `unknown tool ${block.name}` }, record: { tool: block.name, outcome: 'unknown_tool' } };
@@ -96,7 +97,7 @@ export async function runAgent({ task, client, services = {}, mode = 'recommend'
       max_tokens: 16000,
       thinking: { type: 'adaptive' },
       output_config: { effort: 'high' },
-      system: SYSTEM_PROMPT,
+      system: AGENT_SYSTEM_PROMPT,
       tools: toolSchemas(),
       messages,
     });

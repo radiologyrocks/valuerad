@@ -21,7 +21,8 @@ const MODALITY_COST = { MR: 1200, MRI: 1200, CT: 800, PET: 3000, NM: 1500, US: 2
 /**
  * @param {string} toolName
  * @param {object} input
- * @param {object} ctx - { mode: 'recommend'|'autonomous', eligibility?, authStatus? }
+ * @param {object} ctx - { mode: 'recommend'|'autonomous', eligibility?, authStatus?,
+ *   rulePack? (active per-contract auth rules — an activated living feature) }
  * @returns {{ allow: boolean, requiresHumanApproval: boolean, reason: string }}
  */
 export function evaluate(toolName, input = {}, ctx = {}) {
@@ -42,7 +43,7 @@ export function evaluate(toolName, input = {}, ctx = {}) {
 
   // --- The single most important rule: nothing high-cost scans without a valid auth. ---
   if (toolName === 'book_appointment') {
-    const req = authRequired({ modality: input.modality }, { name: input.payer });
+    const req = authRequired({ modality: input.modality }, { name: input.payer }, ctx.rulePack ?? null);
     const ok = safeToPerform({ authRequiredResult: req, authStatus: ctx.authStatus });
     if (!ok) {
       return { allow: false, requiresHumanApproval: false, reason: 'auth_required_not_approved' };

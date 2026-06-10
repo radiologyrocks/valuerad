@@ -100,3 +100,50 @@ CREATE TABLE IF NOT EXISTS wh_facts (
 );
 CREATE INDEX IF NOT EXISTS wh_facts_dataset_idx ON wh_facts (dataset);
 
+-- Living-feature registry — the system of record for user-requested,
+-- system-built features (docs/LIVING_SOFTWARE.md). Rows are versioned and
+-- never overwritten: a new version is a new row; rollback re-points the
+-- active version. `definition` is declarative DSL data (domain/dsl.js),
+-- never code. `test_evidence` is the golden-test attestation bundle.
+CREATE TABLE IF NOT EXISTS living_features (
+  id             BIGSERIAL PRIMARY KEY,
+  feature_key    TEXT NOT NULL,
+  version        INT NOT NULL DEFAULT 1,
+  name           TEXT NOT NULL,
+  kind           TEXT NOT NULL,   -- report | export | rule_pack | ingest_mapper
+  tier           INT NOT NULL,    -- 1 declarative read-only | 2 constrained config
+  spec           TEXT,            -- the natural-language request it was built from
+  definition     JSONB NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'proposed', -- proposed|canary|active|retired|rejected
+  content_hash   TEXT NOT NULL,
+  engine_version TEXT NOT NULL,
+  created_by     TEXT,
+  approved_by    TEXT,
+  test_evidence  JSONB,
+  history        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (feature_key, version)
+);
+CREATE INDEX IF NOT EXISTS living_features_status_idx ON living_features (status, kind);
+-- Additive columns (idempotent for existing deployments):
+-- outcome: the rubric ("what does done look like") captured with the request;
+-- attestation: signed provenance record attached at activation.
+ALTER TABLE living_features ADD COLUMN IF NOT EXISTS outcome JSONB;
+ALTER TABLE living_features ADD COLUMN IF NOT EXISTS attestation JSONB;
+
+-- First-class service principals — agents and integrations as their own
+-- identities (not shared role strings). Tokens are stored hashed; the
+-- plaintext is returned exactly once at creation. In production, dev header
+-- auth is disabled and bearer-token principals are the only machine identity.
+CREATE TABLE IF NOT EXISTS service_principals (
+  id           BIGSERIAL PRIMARY KEY,
+  name         TEXT UNIQUE NOT NULL,
+  token_hash   TEXT UNIQUE NOT NULL,
+  roles        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  created_by   TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ
+);
+

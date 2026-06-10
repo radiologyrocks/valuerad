@@ -40,9 +40,13 @@ export async function apiPost(path, body, { session } = {}) {
 }
 
 export async function apiGet(path) {
+  const headers = {
+    'X-ValueRad-User': DEV_USER,
+    'X-ValueRad-Roles': DEV_ROLES,
+  };
   let res;
   try {
-    res = await fetch(`${API_BASE}${path}`);
+    res = await fetch(`${API_BASE}${path}`, { headers });
   } catch {
     const err = new Error(`Could not reach the backend at ${API_BASE || 'this origin'}.`);
     err.status = 0;

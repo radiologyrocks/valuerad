@@ -10,10 +10,12 @@
 
 import { Router } from 'express';
 import { runAgent, createClient } from '../agent/runner.js';
+import { runAgentDev } from '../agent/runnerDev.js';
 import { store } from '../lib/store.js';
 import { queue } from '../lib/jobs.js';
 import { FhirClient, SchedulingClient } from '../lib/fhir.js';
 import { requireRole, ROLES } from '../lib/rbac.js';
+import { loadActiveRulePack } from '../lib/features.js';
 
 const router = Router();
 
@@ -27,7 +29,7 @@ router.post('/agent/run', requireRole(ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.SCHEDU
   }
 
   const client = await createClient();
-  if (!client) {
+  if (!client && process.env.NODE_ENV === 'production') {
     return res.status(503).json({ error: 'agent_unavailable', detail: 'ANTHROPIC_API_KEY is not configured.' });
   }
 
@@ -45,6 +47,9 @@ router.post('/agent/run', requireRole(ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.SCHEDU
     }
   }
 
+  // Active payer rule packs (Tier-2 living features) feed the auth guardrail.
+  const rulePack = await loadActiveRulePack();
+
   // `data` carries any extra domain context the agent's tools read (waitlist,
   // radiologists, coverage, etc.) until every provider is EHR-backed per tenant.
   const services = {
@@ -53,14 +58,25 @@ router.post('/agent/run', requireRole(ROLES.ADMIN, ROLES.EXECUTIVE, ROLES.SCHEDU
     sessionId,
     scheduling,
     fhir,
+    rulePack,
     ...data,
   };
 
   try {
-    const result = await runAgent({ task, client, services, mode, ctx: context });
+    const result = client
+      ? await runAgent({ task, client, services, mode, ctx: { rulePack, ...context } })
+      // Dev fallback: no API key → Claude Code subscription auth (Agent SDK).
+      // Same tools through the same guardrail; refuses live EHR sessions (no BAA).
+      : await runAgentDev({ task, services, mode, ctx: { rulePack, ...context } });
     return res.json(result);
   } catch (err) {
     console.error('[agent] run error:', err.message);
+    if (!client) {
+      return res.status(503).json({
+        error: 'agent_unavailable',
+        detail: `${err.message} — set ANTHROPIC_API_KEY, or for development run \`claude /login\` with a Claude Pro/Max subscription and leave the key unset.`,
+      });
+    }
     return res.status(500).json({ error: 'agent_error', detail: err.message });
   }
 });

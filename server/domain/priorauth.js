@@ -14,7 +14,8 @@
 const AUTH_REQUIRED_MODALITIES = new Set(['MR', 'MRI', 'CT', 'CTA', 'MRA', 'PET', 'NM']);
 
 // Payers that (in this simplified model) do not require auth for some modalities.
-// Real config comes from contract data; this is the seam.
+// Real config comes from contract data; the per-contract seam is `rulePack`
+// below — an active living feature of kind 'rule_pack' (see domain/feature.js).
 const PAYER_EXCEPTIONS = {
   // 'Medicare': new Set(['XR', 'US']),
 };
@@ -22,13 +23,25 @@ const PAYER_EXCEPTIONS = {
 /**
  * @param {object} order - { modality, cpt?, urgency? }
  * @param {object} payer - { name }
+ * @param {object} [rulePack] - rules-as-data: { payerRules: { [payerName]:
+ *   { exempt?: [modality], require?: [modality] } } }. Emergent exemption
+ *   always wins; a pack can otherwise exempt a default-required modality or
+ *   require auth for one the defaults don't cover.
  * @returns {{ required: boolean, reason: string }}
  */
-export function authRequired(order = {}, payer = {}) {
+export function authRequired(order = {}, payer = {}, rulePack = null) {
   const modality = String(order.modality ?? '').toUpperCase();
 
   if (order.urgency === 'stat' || order.urgency === 'emergent') {
     return { required: false, reason: 'emergent_exempt' };
+  }
+
+  const packRules = rulePack?.payerRules?.[payer.name];
+  if (packRules) {
+    const exempt = (packRules.exempt ?? []).map((m) => String(m).toUpperCase());
+    const require = (packRules.require ?? []).map((m) => String(m).toUpperCase());
+    if (exempt.includes(modality)) return { required: false, reason: 'rule_pack_exempt' };
+    if (require.includes(modality)) return { required: true, reason: 'rule_pack_required' };
   }
 
   const exceptions = PAYER_EXCEPTIONS[payer.name];

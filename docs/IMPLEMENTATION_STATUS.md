@@ -79,6 +79,30 @@ operational record accumulated in Stages 1–3.
 before any PHI reaches the model. The runner is built and tested with an
 injected client; `POST /api/agent/run` returns 503 until the key is set.
 
+## Living software (docs/LIVING_SOFTWARE.md) ✅ in code
+| Capability | Module | Tests |
+|---|---|---|
+| Definition DSL + interpreter over the metric library | `domain/dsl.js` | `test/dsl.test.js` |
+| Tier policy, lifecycle state machine, content hash, golden harness | `domain/feature.js` | `test/features.test.js` |
+| Synthetic golden fixtures (the builder's only data) | `domain/fixtures.js` | used throughout |
+| Versioned feature registry (Postgres + dev memory) | `lib/features.js`, `db/schema.sql` | `test/features.test.js` |
+| Certified catalog (reports, export, rule pack, mapper) | `domain/catalog.js` | `test/features.test.js` |
+| Builder agent (validate → propose; can never activate) | `agent/builder.js` | `test/builder.test.js` |
+| Lifecycle/run/canary/rollback/revalidate API, audited | `routes/features.js` | smoke-tested |
+| Payer rule packs feeding the auth guardrail | `domain/priorauth.js`, `agent/policy.js`, `routes/agent.js` | `test/features.test.js` |
+| Ingest mappers applied at `/api/bi/ingest` | `routes/bi.js` + `domain/dsl.js` (`applyMapper`) | `test/dsl.test.js` |
+| Request box, approval queue, gallery, run/rollback UI | `src/pages/CommandCenter.jsx` | — |
+| MCP surface (16 tools, thin client over the audited API) | `mcp.js` | `test/mcp.test.js` |
+| Outcome rubrics captured + graded at activation | `agent/builder.js`, `routes/features.js` | `test/features.test.js` |
+| Service principals (machine identities, hashed tokens) | `lib/principals.js`, `lib/rbac.js`, `routes/principals.js` | `test/principals.test.js` |
+| Signed attestations at activation (Ed25519) | `lib/attest.js` | `test/attest.test.js` |
+| Eval suite: metric coverage + catalog regression + seams | `domain/evals.js`, `npm run eval` | `test/evals.test.js` |
+| Subscription dev transports for both agents | `agent/runnerDev.js`, `agent/builderDev.js` | `test/runnerDev.test.js`, `test/builderDev.test.js` |
+
+**Needs live wiring:** `ANTHROPIC_API_KEY` for the builder (no BAA needed on
+this path — the builder only ever sees schema docs and synthetic fixtures),
+and the same IdP/Postgres production prerequisites as Stage 0.
+
 ## Honest boundary
 Every piece of business logic and the full agent architecture are implemented
 and tested in-repo. What remains is **integration and infrastructure**, not
