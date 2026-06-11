@@ -13,6 +13,33 @@
 
 import { TOOLS, toolSchemas } from './tools.js';
 import { evaluate, shouldExecute } from './policy.js';
+import { evaluateEligibility } from '../domain/eligibility.js';
+
+/**
+ * Build the AUTHORITATIVE policy context for a tool call from verified system
+ * state (services) — never from client- or model-supplied input. This is the
+ * security boundary that makes the auth/eligibility interlock real: the model
+ * can propose a booking, but it cannot assert that an auth is approved or that
+ * coverage is eligible. Returns only trusted fields; the runner discards any
+ * client-supplied authStatus/eligibility.
+ */
+export async function deriveTrustedCtx(name, input = {}, services = {}) {
+  if (name !== 'book_appointment') return {};
+  const auth = services.auths?.[input.orderId] ?? null;
+  let eligibility = null;
+  try {
+    const coverageBundle = services.fhir && input.patientId ? await services.fhir.coverage(input.patientId) : null;
+    const coverage = coverageBundle?.entry?.[0]?.resource ?? services.coverage ?? null;
+    if (coverage) eligibility = evaluateEligibility(coverage, { modality: input.modality });
+  } catch {
+    eligibility = null; // unverifiable coverage fails closed in policy
+  }
+  return {
+    authStatus: auth?.status ?? 'none',
+    authorizedModality: auth?.modality ?? null,
+    eligibility,
+  };
+}
 
 const MODEL = process.env.AGENT_MODEL || 'claude-opus-4-8';
 const MAX_ITERATIONS = 12;
@@ -47,7 +74,11 @@ export async function executeToolCall(block, { services, mode, ctx }) {
     return { result: { error: `unknown tool ${block.name}` }, record: { tool: block.name, outcome: 'unknown_tool' } };
   }
 
-  const decision = evaluate(block.name, block.input, { mode, ...ctx });
+  // Authoritative context: take ONLY the server-derived rulePack from ctx and
+  // the trusted, services-derived auth/eligibility — never client-supplied
+  // authStatus/eligibility (which a caller could forge to bypass the gate).
+  const trusted = await deriveTrustedCtx(block.name, block.input, services);
+  const decision = evaluate(block.name, block.input, { mode, rulePack: ctx?.rulePack ?? null, ...trusted });
 
   if (!decision.allow) {
     return {

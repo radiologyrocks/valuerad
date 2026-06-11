@@ -127,7 +127,7 @@ optionally override the model.
 `server/mcp.js` exposes the governed API as an MCP server (stdio): feature
 lifecycle (request → approve with rubric grading → run → rollback), the
 certified catalog, attestations, the ops agent, BI report, CSV ingest, and
-the eval suite — 16 tools. It is a **thin client over the HTTP API**, so
+the eval suite — 21 tools. It is a **thin client over the HTTP API**, so
 every call flows through the same RBAC, guardrails, and audit log as the
 dashboard and adds no authority of its own.
 

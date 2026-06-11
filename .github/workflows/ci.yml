@@ -6,6 +6,20 @@ on:
     branches: ["main"]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint
+      # format:check is intentionally not gated yet — a one-time
+      # `npm run format` reformat lands as its own commit so it doesn't bury
+      # logic changes. `npm run format` / config are available now.
+
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -14,7 +28,7 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-      - run: npm install
+      - run: npm ci
       - run: npm run build
 
   server:
@@ -24,7 +38,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm install
+          cache: "npm"
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
         working-directory: server
       - run: npm test
         working-directory: server
@@ -53,7 +69,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm install
+          cache: "npm"
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
         working-directory: server
       - run: node --test test/integration/pg.integration.test.js
         working-directory: server

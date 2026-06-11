@@ -118,6 +118,18 @@ job (EDI 850 / punchout / distributor email).
 this path — the builder only ever sees schema docs and synthetic fixtures),
 and the same IdP/Postgres production prerequisites as Stage 0.
 
+## Six-hat review remediation
+A six-reviewer adversarial review (`docs/REVIEW_FINDINGS.md`) drove a
+hardening pass. Fixed in code: the auth/eligibility interlock now derives
+from verified state (no self-attested bypass) and fails closed; human-approval
+gates reject machine principals; rubric results are enforced at activation and
+bound into the attestation; the audit log is DB-enforced append-only (trigger);
+supply oversell is blocked by `CHECK(qty>=0)` + conditional decrement;
+`escalate_to_human` is wired; global error handler + body limits +
+`unhandledRejection` handler added; the jobs worker is started; money is
+`NUMERIC(12,2)`; status columns are `CHECK`-constrained; ESLint gate added;
+`node-fetch` dropped. Deferred (infra/company) tracked in the findings doc.
+
 ## Honest boundary
 Every piece of business logic and the full agent architecture are implemented
 and tested in-repo. What remains is **integration and infrastructure**, not

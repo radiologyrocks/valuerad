@@ -7,7 +7,6 @@
  * choke point in routes/smart.js — never call these directly without an audit.
  */
 
-import fetch from 'node-fetch';
 
 export class FhirClient {
   constructor({ baseUrl, accessToken }) {

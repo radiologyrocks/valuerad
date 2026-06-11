@@ -44,6 +44,20 @@ class PostgresSupplies {
   }
 
   async adjustLot(itemId, lot, expiry, delta) {
+    // A negative delta (consume) is a conditional decrement: only succeeds if
+    // the lot has enough on hand. Zero rows back ⇒ insufficient stock. This,
+    // plus CHECK(qty>=0), prevents the oversell race two concurrent scans
+    // would otherwise cause. (Receives use the upsert path.)
+    if (delta < 0) {
+      const { rows } = await pool.query(
+        `UPDATE supply_lots SET qty = qty + $4, updated_at = now()
+         WHERE item_id = $1 AND lot = $2 AND expiry IS NOT DISTINCT FROM $3 AND qty + $4 >= 0
+         RETURNING *`,
+        [itemId, lot ?? '', expiry ?? null, delta]
+      );
+      if (!rows[0]) throw new Error('insufficient_stock');
+      return rows[0];
+    }
     const { rows } = await pool.query(
       `INSERT INTO supply_lots (item_id, lot, expiry, qty) VALUES ($1,$2,$3,$4)
        ON CONFLICT (item_id, lot, expiry)
@@ -170,6 +184,9 @@ class MemorySupplies {
       row = { id: ++this._seq.lot, item_id: Number(itemId), lot: lot ?? '', expiry: expiry ?? null, qty: 0 };
       this.lots.push(row);
     }
+    // Mirror the PG CHECK(qty>=0) so the unit suite catches oversell, not just
+    // the integration suite (the backends must agree on this invariant).
+    if (row.qty + delta < 0) throw new Error('insufficient_stock');
     row.qty += delta;
     row.updated_at = new Date();
     return { ...row };

@@ -13,7 +13,7 @@
  * mode:"ephemeral-dev" so nobody mistakes a dev signature for provenance.
  */
 
-import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto';
 
 function loadKeys() {
   if (process.env.ATTESTATION_PRIVATE_KEY) {
@@ -35,8 +35,13 @@ function stableStringify(value) {
   return JSON.stringify(value);
 }
 
-/** Sign an activation. Returns the full attestation record to store with the feature. */
-export function attestFeature(feature, { approvedBy } = {}) {
+/**
+ * Sign an activation. Returns the full attestation record to store with the
+ * feature. When an `outcomeReview` is supplied, a hash of the human's rubric
+ * grading is bound into the signed payload — so "a human reviewed and graded
+ * this" is part of the provenance, not an unsigned field stored beside it.
+ */
+export function attestFeature(feature, { approvedBy, outcomeReview } = {}) {
   const payload = {
     featureKey: feature.feature_key,
     version: feature.version,
@@ -46,6 +51,9 @@ export function attestFeature(feature, { approvedBy } = {}) {
     engineVersion: feature.engine_version,
     evidenceHash: feature.test_evidence?.snapshotHash ?? null,
     approvedBy: approvedBy ?? feature.approved_by ?? null,
+    rubricReviewHash: outcomeReview
+      ? createHash('sha256').update(stableStringify(outcomeReview)).digest('hex')
+      : null,
     signedAt: new Date().toISOString(),
   };
   const signature = sign(null, Buffer.from(stableStringify(payload)), privateKey).toString('base64');

@@ -4,10 +4,14 @@
   "description": "ValueRad command center backend — SMART on FHIR, encrypted token store, audit log",
   "type": "module",
   "main": "index.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
     "test": "node --test",
+    "seed": "node scripts/seed-demo.mjs",
     "eval": "node scripts/run-evals.mjs",
     "eval:update": "node scripts/update-eval-baselines.mjs",
     "mcp": "node mcp.js"
@@ -17,7 +21,6 @@
     "@anthropic-ai/sdk": "^0.104.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "express": "^4.19.2",
-    "node-fetch": "^3.3.2",
     "pg": "^8.13.1",
     "zod": "^4.4.3"
   }
