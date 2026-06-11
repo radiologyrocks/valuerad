@@ -42,14 +42,26 @@ export function evaluate(toolName, input = {}, ctx = {}) {
   const cost = MODALITY_COST[String(input.modality ?? '').toUpperCase()] ?? 0;
 
   // --- The single most important rule: nothing high-cost scans without a valid auth. ---
+  // SECURITY: ctx.authStatus / ctx.eligibility / ctx.authorizedModality MUST be
+  // derived by the runner from authoritative system state (deriveTrustedCtx),
+  // never from client- or model-supplied input. A self-attested "approved"
+  // must not book a study. The runner strips client values before calling here.
   if (toolName === 'book_appointment') {
     const req = authRequired({ modality: input.modality }, { name: input.payer }, ctx.rulePack ?? null);
     const ok = safeToPerform({ authRequiredResult: req, authStatus: ctx.authStatus });
     if (!ok) {
       return { allow: false, requiresHumanApproval: false, reason: 'auth_required_not_approved' };
     }
-    // Must have verified, eligible coverage for a high-cost study before booking.
-    if (cost >= HUMAN_APPROVAL_DOLLARS && ctx.eligibility && ctx.eligibility.eligible === false) {
+    // The booked modality must match the modality the order was authorized for —
+    // an XR auth cannot be used to book a PET.
+    if (req.required && ctx.authorizedModality &&
+        String(ctx.authorizedModality).toUpperCase() !== String(input.modality ?? '').toUpperCase()) {
+      return { allow: false, requiresHumanApproval: false, reason: 'modality_mismatch' };
+    }
+    // Fail CLOSED on coverage: a high-cost study needs *verified* eligibility
+    // (eligible === true). Unknown/unverified coverage requires human sign-off,
+    // it does not sail through. "Never scan something you can't get paid for."
+    if (cost >= HUMAN_APPROVAL_DOLLARS && ctx.eligibility?.eligible !== true) {
       return { allow: false, requiresHumanApproval: true, reason: 'coverage_not_verified' };
     }
   }

@@ -6,7 +6,6 @@
  */
 
 import { randomBytes, createHash } from 'node:crypto';
-import fetch from 'node-fetch';
 
 // ---------------------------------------------------------------------------
 // PKCE

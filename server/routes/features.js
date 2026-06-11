@@ -20,7 +20,7 @@
  */
 
 import { Router } from 'express';
-import { requireRole, ROLES } from '../lib/rbac.js';
+import { requireRole, requireHuman, ROLES } from '../lib/rbac.js';
 import { store } from '../lib/store.js';
 import { featureRegistry, featureRegistryBackend } from '../lib/features.js';
 import { loadDatasets, warehouse } from '../lib/warehouse.js';
@@ -188,7 +188,7 @@ async function load(req, res) {
   return feature;
 }
 
-router.post('/features/:id/approve', approver, async (req, res) => {
+router.post('/features/:id/approve', approver, requireHuman, async (req, res) => {
   try {
     const feature = await load(req, res);
     if (!feature) return;
@@ -203,7 +203,10 @@ router.post('/features/:id/approve', approver, async (req, res) => {
     if (!gate.ok) return res.status(422).json({ error: gate.reason });
 
     // If the request captured an outcome rubric, activation requires the
-    // approver to grade it — that review is part of the attestation trail.
+    // approver to grade it AND every criterion must be satisfied — a failed
+    // criterion blocks activation unless the approver supplies an explicit
+    // override reason (which is recorded and signed). This review is bound
+    // into the attestation, not just stored beside it.
     let outcomeReview = null;
     const rubric = feature.outcome?.rubric;
     if (Array.isArray(rubric) && rubric.length > 0) {
@@ -215,12 +218,25 @@ router.post('/features/:id/approve', approver, async (req, res) => {
           rubric,
         });
       }
+      const graded = results.map(Boolean);
+      const satisfiedCount = graded.filter(Boolean).length;
+      const override = typeof req.body?.overrideReason === 'string' ? req.body.overrideReason.trim() : '';
+      if (satisfiedCount < rubric.length && !override) {
+        return res.status(422).json({
+          error: 'rubric_not_satisfied',
+          detail: `${satisfiedCount}/${rubric.length} criteria satisfied. Activation is blocked unless every criterion passes, or you supply overrideReason.`,
+          rubric,
+          results: graded,
+        });
+      }
       outcomeReview = {
         rubric,
-        results: results.map(Boolean),
-        satisfiedCount: results.filter(Boolean).length,
+        results: graded,
+        satisfiedCount,
+        rubricAuthor: feature.created_by?.startsWith('builder') || feature.created_by === 'agent' ? 'model' : 'human',
         reviewedBy: req.user.id,
         reviewedAt: new Date().toISOString(),
+        ...(override ? { override } : {}),
       };
     }
 
@@ -233,8 +249,9 @@ router.post('/features/:id/approve', approver, async (req, res) => {
     }
 
     // Sign the activation: the attestation binds content hash, engine,
-    // evidence, and approver into a verifiable provenance record.
-    const attestation = attestFeature({ ...feature, approved_by: req.user.id });
+    // evidence, approver, AND the rubric review (what the human verified) into
+    // a verifiable provenance record.
+    const attestation = attestFeature({ ...feature, approved_by: req.user.id }, { outcomeReview });
     return applyTransition(
       req, res, feature, FEATURE_STATES.ACTIVE,
       { gate: gate.reason, ...(outcomeReview ? { outcomeSatisfied: `${outcomeReview.satisfiedCount}/${rubric.length}` } : {}) },

@@ -47,6 +47,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS audit_log_at_idx ON audit_log (at);
 CREATE INDEX IF NOT EXISTS audit_log_session_idx ON audit_log (session_id);
+CREATE INDEX IF NOT EXISTS audit_log_actor_idx ON audit_log (actor, at);
+
+-- Enforce append-only at the DB, not just by convention: block UPDATE/DELETE
+-- on the audit log. (Deployment should ALSO run the app under a role without
+-- UPDATE/DELETE grants — defense in depth — but this trigger holds even if the
+-- app connects as owner.) See docs/REVIEW_FINDINGS.md CV1.
+CREATE OR REPLACE FUNCTION audit_log_immutable() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_log is append-only (% blocked)', TG_OP;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS audit_log_no_mutate ON audit_log;
+CREATE TRIGGER audit_log_no_mutate
+  BEFORE UPDATE OR DELETE ON audit_log
+  FOR EACH ROW EXECUTE FUNCTION audit_log_immutable();
 
 -- ValueRad's own staff/users and roles (RBAC). The agent later gets a row here
 -- too, so every autonomous action is attributable.
@@ -157,11 +172,11 @@ CREATE TABLE IF NOT EXISTS supply_items (
   name           TEXT NOT NULL,
   category       TEXT,            -- contrast | catheter | ppe | pharma | other
   unit           TEXT,            -- vial | each | box
-  pack_size      INT NOT NULL DEFAULT 1,
-  unit_cost      NUMERIC NOT NULL DEFAULT 0,
-  par_level      INT NOT NULL DEFAULT 0,
-  reorder_point  INT NOT NULL DEFAULT 0,
-  lead_time_days INT NOT NULL DEFAULT 7,
+  pack_size      INT NOT NULL DEFAULT 1 CHECK (pack_size > 0),
+  unit_cost      NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (unit_cost >= 0),
+  par_level      INT NOT NULL DEFAULT 0 CHECK (par_level >= 0),
+  reorder_point  INT NOT NULL DEFAULT 0 CHECK (reorder_point >= 0),
+  lead_time_days INT NOT NULL DEFAULT 7 CHECK (lead_time_days >= 0),
   vendor         TEXT,
   restricted     BOOLEAN NOT NULL DEFAULT false, -- always needs human approval
   is_active      BOOLEAN NOT NULL DEFAULT true,
@@ -173,7 +188,7 @@ CREATE TABLE IF NOT EXISTS supply_lots (
   item_id    BIGINT NOT NULL REFERENCES supply_items(id) ON DELETE CASCADE,
   lot        TEXT NOT NULL DEFAULT '',
   expiry     DATE,
-  qty        INT NOT NULL DEFAULT 0,
+  qty        INT NOT NULL DEFAULT 0 CHECK (qty >= 0), -- never oversell into negative
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (item_id, lot, expiry)
 );
@@ -183,7 +198,7 @@ CREATE TABLE IF NOT EXISTS supply_events (
   at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   item_id BIGINT NOT NULL REFERENCES supply_items(id) ON DELETE CASCADE,
   lot     TEXT,
-  action  TEXT NOT NULL,   -- receive | use | adjust
+  action  TEXT NOT NULL CHECK (action IN ('receive','use','adjust')),
   qty     INT NOT NULL,
   actor   TEXT,
   detail  JSONB
@@ -192,9 +207,10 @@ CREATE INDEX IF NOT EXISTS supply_events_item_idx ON supply_events (item_id, at)
 
 CREATE TABLE IF NOT EXISTS supply_orders (
   id          BIGSERIAL PRIMARY KEY,
-  status      TEXT NOT NULL DEFAULT 'proposed', -- proposed|approved|placed|received|cancelled
+  status      TEXT NOT NULL DEFAULT 'proposed'
+              CHECK (status IN ('proposed','approved','placed','received','cancelled')),
   lines       JSONB NOT NULL,                   -- [{itemId, gtin, name, qty, unitCost, lineTotal, restricted}]
-  total_cost  NUMERIC NOT NULL DEFAULT 0,
+  total_cost  NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (total_cost >= 0),
   vendor      TEXT,
   created_by  TEXT,
   approved_by TEXT,

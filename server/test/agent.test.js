@@ -29,9 +29,52 @@ test('book_appointment blocked when high-cost auth not approved', () => {
   assert.equal(d.reason, 'auth_required_not_approved');
 });
 
-test('book_appointment allowed when auth approved; high value needs human approval', () => {
-  const d = evaluate('book_appointment', { modality: 'MR', payer: 'Aetna' }, { authStatus: AUTH_STATES.APPROVED });
-  assert.equal(d.allow, true);
+test('book_appointment allowed only with approved auth AND verified eligibility', () => {
+  // auth approved but eligibility unverified → fails CLOSED (needs sign-off)
+  const unverified = evaluate('book_appointment', { modality: 'MR', payer: 'Aetna' }, { authStatus: AUTH_STATES.APPROVED });
+  assert.equal(unverified.allow, false);
+  assert.equal(unverified.reason, 'coverage_not_verified');
+
+  // auth approved AND coverage verified eligible → allowed
+  const ok = evaluate('book_appointment', { modality: 'MR', payer: 'Aetna' }, { authStatus: AUTH_STATES.APPROVED, eligibility: { eligible: true } });
+  assert.equal(ok.allow, true);
+});
+
+test('book_appointment: authorized modality must match the booked modality', () => {
+  const d = evaluate('book_appointment', { modality: 'PET', payer: 'Aetna' },
+    { authStatus: AUTH_STATES.APPROVED, authorizedModality: 'XR', eligibility: { eligible: true } });
+  assert.equal(d.allow, false);
+  assert.equal(d.reason, 'modality_mismatch');
+});
+
+test('SECURITY: the runner ignores client-supplied authStatus/eligibility (no self-attested bypass)', async () => {
+  const { executeToolCall } = await import('../agent/runner.js');
+  // A caller forges approved auth + eligible coverage in ctx; services have NO
+  // matching auth. The runner must derive trusted state and block the booking.
+  const forgedCtx = { authStatus: AUTH_STATES.APPROVED, eligibility: { eligible: true } };
+  const { record } = await executeToolCall(
+    { name: 'book_appointment', input: { orderId: 'o-1', patientId: 'p-1', slotId: 's-1', modality: 'MR', payer: 'Aetna', start: '2026-06-15T09:00:00Z' } },
+    { services: { auths: {} }, mode: 'autonomous', ctx: forgedCtx }
+  );
+  assert.equal(record.outcome, 'blocked');
+  assert.equal(record.reason, 'auth_required_not_approved');
+});
+
+test('SECURITY: a real approved order with verified coverage passes the auth gate', async () => {
+  const { executeToolCall } = await import('../agent/runner.js');
+  const services = {
+    auths: { 'o-1': { status: AUTH_STATES.APPROVED, modality: 'MR' } },
+    coverage: { status: 'active', period: { start: '2026-01-01', end: '2026-12-31' } },
+    scheduling: { bookAppointment: async (a) => a },
+  };
+  const { record } = await executeToolCall(
+    { name: 'book_appointment', input: { orderId: 'o-1', patientId: 'p-1', slotId: 's-1', modality: 'MR', payer: 'Aetna', start: '2026-06-15T09:00:00Z' } },
+    { services, mode: 'autonomous', ctx: {} }
+  );
+  // Passes auth+eligibility (not 'blocked'); a $1,200 MR is high-value, so it's
+  // proposed for human sign-off even in autonomous mode rather than auto-booked.
+  assert.equal(record.outcome, 'proposed');
+  assert.equal(record.reason, 'high_value_mutation');
 });
 
 test('low-cost mutation does not require human approval; high-cost does', () => {

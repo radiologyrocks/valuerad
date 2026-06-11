@@ -18,7 +18,7 @@
  */
 
 import { Router } from 'express';
-import { requireRole, ROLES } from '../lib/rbac.js';
+import { requireRole, requireHuman, ROLES } from '../lib/rbac.js';
 import { store } from '../lib/store.js';
 import { queue } from '../lib/jobs.js';
 import { supplies, suppliesBackend } from '../lib/supplies.js';
@@ -183,7 +183,7 @@ async function loadOrder(req, res) {
   return order;
 }
 
-router.post('/supplies/orders/:id/approve', approver, async (req, res) => {
+router.post('/supplies/orders/:id/approve', approver, requireHuman, async (req, res) => {
   try {
     const order = await loadOrder(req, res);
     if (!order) return;

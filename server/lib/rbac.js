@@ -64,3 +64,20 @@ export function requireRole(...allowed) {
     next();
   };
 }
+
+/**
+ * Run after requireRole on endpoints where the "requires a HUMAN" invariant
+ * must hold (feature activation, supply-order confirmation). A service
+ * principal — even one granted admin/executive — is a machine identity and
+ * cannot satisfy a human-approval gate. This is what makes "the agent proposes,
+ * a human disposes" real rather than an RBAC role a token happens to hold.
+ */
+export function requireHuman(req, res, next) {
+  if (req.user?.principal) {
+    return res.status(403).json({
+      error: 'human_approval_required',
+      detail: 'This action requires a human approver; service-principal identities cannot approve.',
+    });
+  }
+  next();
+}

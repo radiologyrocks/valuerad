@@ -197,17 +197,18 @@ export const TOOLS = {
   book_appointment: {
     kind: 'write',
     description:
-      'Book a scanner appointment. Only call after eligibility is verified and, for studies that require it, prior auth is approved. The platform blocks unsafe bookings.',
+      'Book a scanner appointment. Pass the orderId so the platform can verify the order\'s prior-auth status and that the authorized modality matches. The platform independently re-checks auth + eligibility and blocks unsafe bookings — it does not trust your assertion that they are satisfied.',
     input_schema: {
       type: 'object',
       properties: {
+        orderId: { type: 'string', description: 'the order being booked; the platform verifies its auth + modality' },
         patientId: { type: 'string' },
         slotId: { type: 'string' },
         modality: { type: 'string' },
         start: { type: 'string' },
         end: { type: 'string' },
       },
-      required: ['patientId', 'slotId', 'modality', 'start'],
+      required: ['orderId', 'patientId', 'slotId', 'modality', 'start'],
     },
     async handler({ input, services }) {
       const appointment = {
@@ -274,8 +275,24 @@ export const TOOLS = {
       },
       required: ['reason'],
     },
-    async handler({ input }) {
-      return { escalated: true, to: input.role ?? 'admin', reason: input.reason };
+    async handler({ input, services }) {
+      const to = input.role ?? 'admin';
+      // Actually route the escalation: record it on an audited queue so a human
+      // is genuinely notified, instead of returning into the void.
+      const jobId = services.queue
+        ? await services.queue.enqueue('notify_human', { to, reason: input.reason, context: input.context ?? null })
+        : null;
+      if (services.store?.audit) {
+        await services.store.audit({
+          actor: 'agent',
+          sessionId: services.sessionId,
+          action: 'agent.escalated',
+          resource: to,
+          outcome: 'success',
+          detail: { reason: input.reason, jobId },
+        });
+      }
+      return { escalated: true, to, reason: input.reason, jobId };
     },
   },
 };
